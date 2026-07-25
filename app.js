@@ -1781,10 +1781,29 @@ function renderResolverIA(view) {
     const enunciado = $('#ia-enunciado').value.trim();
     if (!enunciado) { showToast('Cole o enunciado da questão primeiro.', 'danger'); return; }
 
+    const disciplinaPreenchida = $('#ia-disciplina').value.trim();
+    if (!disciplinaPreenchida) {
+      showToast('Preencha a Disciplina antes de gerar — sem isso o resumo fica sem matéria no Caderno.', 'danger');
+      $('#ia-disciplina').focus();
+      return;
+    }
+
     const gabaritoOficial = $('#ia-gabarito-oficial').value.trim();
     const respostaMarcada = $('#ia-resposta-marcada').value.trim();
-    const disciplina = $('#ia-disciplina').value.trim();
-    const assunto = $('#ia-assunto').value.trim();
+
+    // Captura os campos de matéria direto do DOM aqui (não só via listener
+    // de 'change') — se o usuário selecionou pelo autocomplete ou clicou
+    // direto em "Gerar" sem tirar o foco do campo, o evento 'change' pode
+    // não ter disparado ainda, e o re-render que acontece depois de gerar
+    // reconstrói o formulário a partir de _resolverIASessao. Sem isso, os
+    // campos voltavam vazios ("(Sem matéria)") mesmo com o texto digitado.
+    _resolverIASessao = {
+      disciplina: $('#ia-disciplina').value.trim(),
+      assunto: $('#ia-assunto').value.trim(),
+      banca: $('#ia-banca').value.trim(),
+      concurso: $('#ia-concurso').value.trim()
+    };
+    const { disciplina, assunto } = _resolverIASessao;
 
     const btn = $('#btn-gerar-resumo-ia');
     btn.disabled = true;
