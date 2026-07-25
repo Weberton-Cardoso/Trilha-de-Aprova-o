@@ -41,6 +41,15 @@ function daysAgoISO(n) {
   return toISODate(d);
 }
 
+/** Soma (ou subtrai, com n negativo) n dias a uma data ISO 'YYYY-MM-DD'
+ *  qualquer — diferente de daysAgoISO, que é sempre relativo a hoje. */
+function somarDiasISO(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + n);
+  return toISODate(dt);
+}
+
 function fmtPct(n) {
   if (!isFinite(n)) return '0%';
   return `${n.toFixed(1)}%`;
@@ -578,6 +587,20 @@ function calcSequenciaDias() {
   return streak;
 }
 
+/** Maior sequência de dias consecutivos com pelo menos 1 tentativa, em toda
+ *  a história registrada (diferente de calcSequenciaDias, que é só a
+ *  sequência atual, até hoje). Usado no subtexto "Melhor: X dias". */
+function calcMelhorSequenciaDias() {
+  const datas = Array.from(new Set(state.tentativas.map(t => t.data))).sort();
+  if (!datas.length) return 0;
+  let melhor = 1, atual = 1;
+  for (let i = 1; i < datas.length; i++) {
+    atual = (somarDiasISO(datas[i], -1) === datas[i - 1]) ? atual + 1 : 1;
+    if (atual > melhor) melhor = atual;
+  }
+  return melhor;
+}
+
 /** Últimos N dias como array de {iso, count, correctRatio} para a trilha visual */
 function calcTrilhaDias(n = 30) {
   const dias = [];
@@ -648,9 +671,37 @@ function renderDashboard(view) {
   const lista = filtrarTentativasPorPeriodo(inicio, fim);
   const resumo = calcResumo(lista);
   const streak = calcSequenciaDias();
+  const melhorStreak = calcMelhorSequenciaDias();
 
   const diasNoPeriodo = Math.max(1, (new Date(fim) - new Date(inicio)) / 86400000 + 1);
   const mediaDiaria = resumo.total / diasNoPeriodo;
+
+  // Período imediatamente anterior, com a mesma duração — usado só pros
+  // textos de comparação ("+X vs período anterior") dos stat-cards. Não
+  // se aplica ao filtro "tudo" (não há "período anterior" ao histórico
+  // inteiro), então os deltas ficam ocultos nesse caso.
+  const duracaoDias = Math.round(diasNoPeriodo);
+  const temPeriodoAnterior = filtro.tipo !== 'tudo';
+  const fimAnterior = somarDiasISO(inicio, -1);
+  const inicioAnterior = somarDiasISO(fimAnterior, -(duracaoDias - 1));
+  const listaAnterior = temPeriodoAnterior ? filtrarTentativasPorPeriodo(inicioAnterior, fimAnterior) : [];
+  const resumoAnterior = calcResumo(listaAnterior);
+  const mediaDiariaAnterior = resumoAnterior.total / duracaoDias;
+
+  const deltaTaxa = resumo.taxa - resumoAnterior.taxa;
+  const deltaTentativas = resumo.tentativas - resumoAnterior.tentativas;
+  const deltaMedia = mediaDiaria - mediaDiariaAnterior;
+
+  /** Monta o texto pequeno de comparação sob o valor do card, com sinal e
+   *  cor (positive/negative) — ou string vazia se não houver período
+   *  anterior pra comparar. */
+  function deltaTexto(valor, formatar, unidadeSingular = '') {
+    if (!temPeriodoAnterior) return { texto: '', classe: '' };
+    const sinal = valor > 0 ? '+' : (valor < 0 ? '−' : '');
+    const texto = `${sinal}${formatar(Math.abs(valor))}${unidadeSingular} vs período anterior`;
+    const classe = valor > 0 ? 'positive' : (valor < 0 ? 'negative' : '');
+    return { texto, classe };
+  }
 
   const porDisciplina = agruparPor(lista, 'disciplina').slice(0, 6);
   const trilha = calcTrilhaDias(30);
@@ -660,6 +711,29 @@ function renderDashboard(view) {
   // do filtro de período escolhido acima no dashboard.
   const minutosTotalCiclo = (state.cicloSessoes || [])
     .reduce((soma, s) => soma + (Number(s && s.minutos) || 0), 0);
+  // Tempo estudado dentro do período selecionado no filtro (esse sim
+  // respeita o filtro) — vai no subtexto do card, pra dar contexto ao
+  // total acumulado acima.
+  const minutosPeriodoCiclo = (state.cicloSessoes || [])
+    .filter(s => s && s.data >= inicio && s.data <= fim)
+    .reduce((soma, s) => soma + (Number(s.minutos) || 0), 0);
+
+  const dTaxa = deltaTexto(deltaTaxa, (v) => `${v.toFixed(1)}%`);
+  const dTentativas = deltaTexto(deltaTentativas, (v) => `${v}`);
+  const dMedia = deltaTexto(deltaMedia, (v) => v.toFixed(1));
+
+  // Ícones dos stat-cards (mesmo estilo/tamanho dos ícones do menu lateral)
+  const ic = {
+    clipboard: '<path fill="currentColor" d="M9 2a1 1 0 00-1 1H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2h-2a1 1 0 00-1-1zm0 2h6v2H9zM7 11h10v2H7zm0 4h10v2H7z"/>',
+    check: '<path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20zm-1.5 14.5L6 12l1.4-1.4 3.1 3.1 6.1-6.1L18 9z"/>',
+    x: '<path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20zm3.5 12.1L14.1 15.5 12 13.4l-2.1 2.1-1.4-1.4L10.6 12 8.5 9.9l1.4-1.4L12 10.6l2.1-2.1 1.4 1.4L13.4 12z"/>',
+    target: '<path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 4a6 6 0 110 12 6 6 0 010-12zm0 3a3 3 0 100 6 3 3 0 000-6z"/>',
+    list: '<path fill="currentColor" d="M4 4h16v2H4zm2 4h12v2H6zm-2 4h16v2H4zm3 4h10v2H7z"/>',
+    trend: '<path fill="currentColor" d="M3 17l6-6 4 4 7-8 1.4 1.4-8.4 9.6-4-4L4.4 18.4z"/>',
+    flame: '<path fill="currentColor" d="M12 2c1 3-2 4-2 7a4 4 0 108 0c0-1-1-1.5-1-1.5.5 2-1 3-2 3a2.5 2.5 0 01-1-4.8C15 4 12 2 12 2zM8 14a4 4 0 108 0c0 3-2 3-2 5a2 2 0 01-4 0c0-2 1-3-2-5z"/>',
+    clock: '<path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 5v5.4l4 2.4-.8 1.3-4.7-2.8V7z"/>'
+  };
+  function iconSvg(path) { return `<svg viewBox="0 0 24 24" width="19" height="19">${path}</svg>`; }
 
   view.innerHTML = `
     <div class="filter-bar" id="dash-filters">
@@ -676,14 +750,70 @@ function renderDashboard(view) {
     </div>
 
     <div class="stat-grid">
-      <div class="stat-card"><div class="label">Total de questões</div><div class="value">${resumo.total}</div></div>
-      <div class="stat-card success"><div class="label">Questões certas</div><div class="value">${resumo.certas}</div></div>
-      <div class="stat-card danger"><div class="label">Questões erradas</div><div class="value">${resumo.erradas}</div></div>
-      <div class="stat-card gold"><div class="label">Taxa de acerto</div><div class="value">${fmtPct(resumo.taxa)}</div></div>
-      <div class="stat-card info"><div class="label">Tentativas registradas</div><div class="value">${resumo.tentativas}</div></div>
-      <div class="stat-card"><div class="label">Média de questões/dia</div><div class="value">${mediaDiaria.toFixed(1)}</div></div>
-      <div class="stat-card gold"><div class="label">Sequência de dias</div><div class="value">${streak} 🔥</div></div>
-      <div class="stat-card info"><div class="label">Tempo total estudado</div><div class="value">${_formatarMinutos(minutosTotalCiclo)}</div></div>
+      <div class="stat-card">
+        <div class="stat-card-icon">${iconSvg(ic.clipboard)}</div>
+        <div class="stat-card-body">
+          <div class="label">Total de questões</div>
+          <div class="value">${resumo.total}</div>
+          <div class="delta">100% respondidas</div>
+        </div>
+      </div>
+      <div class="stat-card success">
+        <div class="stat-card-icon">${iconSvg(ic.check)}</div>
+        <div class="stat-card-body">
+          <div class="label">Questões certas</div>
+          <div class="value">${resumo.certas}</div>
+          <div class="delta">${fmtPct(resumo.total ? resumo.certas / resumo.total * 100 : 0)} do total</div>
+        </div>
+      </div>
+      <div class="stat-card danger">
+        <div class="stat-card-icon">${iconSvg(ic.x)}</div>
+        <div class="stat-card-body">
+          <div class="label">Questões erradas</div>
+          <div class="value">${resumo.erradas}</div>
+          <div class="delta">${fmtPct(resumo.total ? resumo.erradas / resumo.total * 100 : 0)} do total</div>
+        </div>
+      </div>
+      <div class="stat-card gold">
+        <div class="stat-card-icon">${iconSvg(ic.target)}</div>
+        <div class="stat-card-body">
+          <div class="label">Taxa de acerto</div>
+          <div class="value">${fmtPct(resumo.taxa)}</div>
+          <div class="delta ${dTaxa.classe}">${dTaxa.texto}</div>
+        </div>
+      </div>
+      <div class="stat-card info">
+        <div class="stat-card-icon">${iconSvg(ic.list)}</div>
+        <div class="stat-card-body">
+          <div class="label">Tentativas registradas</div>
+          <div class="value">${resumo.tentativas}</div>
+          <div class="delta ${dTentativas.classe}">${dTentativas.texto}</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-icon">${iconSvg(ic.trend)}</div>
+        <div class="stat-card-body">
+          <div class="label">Média de questões/dia</div>
+          <div class="value">${mediaDiaria.toFixed(1)}</div>
+          <div class="delta ${dMedia.classe}">${dMedia.texto}</div>
+        </div>
+      </div>
+      <div class="stat-card gold">
+        <div class="stat-card-icon">${iconSvg(ic.flame)}</div>
+        <div class="stat-card-body">
+          <div class="label">Sequência de dias</div>
+          <div class="value">${streak} 🔥</div>
+          <div class="delta">Melhor: ${melhorStreak} dias</div>
+        </div>
+      </div>
+      <div class="stat-card info">
+        <div class="stat-card-icon">${iconSvg(ic.clock)}</div>
+        <div class="stat-card-body">
+          <div class="label">Tempo total estudado</div>
+          <div class="value">${_formatarMinutos(minutosTotalCiclo)}</div>
+          <div class="delta">${_formatarMinutos(minutosPeriodoCiclo)} no período</div>
+        </div>
+      </div>
     </div>
 
     <div class="card mb-12" id="card-relatorio-diario"></div>
