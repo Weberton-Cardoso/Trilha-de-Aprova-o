@@ -735,6 +735,16 @@ tr.row-motivo td{ padding-top:0; padding-bottom:8px; border-top:none; }
 
   .grid-2, .grid-3{ gap:10px; }
 
+  /* form-grid-2 (Disciplina/Tópico, Banca/Concurso, Gabarito/Resposta em
+     "Resolver com IA", etc.) não tinha versão pra celular — ficava
+     forçando 2 colunas apertadas e cortando labels mais longos. */
+  .form-grid-2{ grid-template-columns:1fr; gap:0; }
+
+  /* A caixa de colar o enunciado da questão é enorme (rows="14") — bom no
+     PC, mas no celular vira uma área vazia gigante antes de qualquer botão
+     aparecer. Reduz a altura mantendo o texto que já foi digitado visível. */
+  #ia-enunciado{ min-height:140px; height:140px; }
+
   .btn{ padding:9px 13px; font-size:13.5px; }
   .btn-sm{ padding:7px 10px; font-size:12.5px; }
 
