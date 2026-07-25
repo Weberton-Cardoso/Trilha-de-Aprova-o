@@ -1637,7 +1637,7 @@ function openTentativaModal(tentativa = null) {
    ============================================================ */
 
 function _montarPromptResumo({ enunciado, gabaritoOficial, disciplina, assunto }) {
-  return `Você vai gerar dois resumos sobre o tema da questão abaixo, no estilo de um caderno de estudos para concurso público — NÃO no formato de flashcard pergunta/resposta.
+  return `Você é um professor experiente preparando alunos para concurso público. Vai gerar dois resumos sobre o tema da questão abaixo, no estilo de um caderno de estudos — NÃO no formato de flashcard pergunta/resposta.
 
 MATÉRIA: ${disciplina || '(não informado)'}
 TÓPICO: ${assunto || '(não informado)'}
@@ -1649,8 +1649,8 @@ ${gabaritoOficial
     : 'GABARITO: não informado — analise a questão e indique qual alternativa você acredita ser a correta. Isso é só uma sugestão, pode estar errada.'}
 
 Gere:
-1. "bruto": explicação da teoria por trás da questão, em 1-2 parágrafos, estilo aula resumida, direto ao ponto.
-2. "condensado": versão ultra-compacta, estilo "Comp. privativa U = art.22 · Comum = art.23 (todos entes) · Concorrente = art.24" — frases curtas separadas por "·", sem pergunta, sem introdução, só o essencial pra fixação.
+1. "bruto": uma explicação COMPLETA e aprofundada da teoria por trás da questão — do nível que você daria numa aula de verdade, não um resumo raso. Não tenha medo de escrever vários parágrafos se o tema exigir. Cubra: (a) o conceito central e sua base legal/doutrinária quando aplicável; (b) por que a alternativa correta está certa E por que as principais alternativas erradas estão erradas (isso costuma ser o que mais ajuda a fixar); (c) exemplos, pegadinhas comuns de banca sobre esse tema, ou uma regra prática/mnemônico se existir um bom. Escreva como se o aluno NUNCA tivesse visto o assunto — não presuma conhecimento prévio. Só corte informação se ela for irrelevante pro tema; não corte por medo de ser longo.
+2. "condensado": versão ultra-compacta, estilo "Comp. privativa U = art.22 · Comum = art.23 (todos entes) · Concorrente = art.24" — frases curtas separadas por "·", sem pergunta, sem introdução, só o essencial pra fixação (esse SIM deve ser curto — é o "bruto" que precisa ser completo).
 ${gabaritoOficial ? '' : '3. "gabaritoSugerido": a letra/valor da alternativa que você acredita ser a correta, ou null se não der pra determinar.'}
 
 Responda SOMENTE em JSON válido, sem markdown, sem texto fora do JSON:
@@ -1736,7 +1736,7 @@ function renderResolverIA(view) {
       <div class="card-title" style="margin-bottom:12px;">Questão</div>
       <div class="form-row">
         <label>Cole aqui o enunciado e as alternativas</label>
-        <textarea id="ia-enunciado" rows="7" placeholder="Cole a questão completa...">${escapeHtml(_resolverIAAtual?.enunciado || '')}</textarea>
+        <textarea id="ia-enunciado" rows="14" placeholder="Cole a questão completa...">${escapeHtml(_resolverIAAtual?.enunciado || '')}</textarea>
       </div>
       <div class="form-grid-2">
         <div class="form-row">
@@ -1846,7 +1846,7 @@ function _renderResolverIAResultado(view) {
         : `<span class="badge muted" style="margin-bottom:10px;display:inline-block;">🤖 IA sugere: ${escapeHtml(r.gabaritoSugerido || '—')} (confirme antes de salvar)</span>`
       }
 
-      <p class="texto-resumo-bruto" style="line-height:1.55;font-size:13.5px;color:var(--text);margin:8px 0 14px;">${escapeHtml(r.bruto)}</p>
+      <p class="texto-resumo-bruto" style="line-height:1.6;font-size:13.5px;color:var(--text);margin:8px 0 14px;white-space:pre-wrap;">${escapeHtml(r.bruto)}</p>
 
       <div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:13px;margin-bottom:16px;">
         📎 ${escapeHtml(r.condensado)}
@@ -1865,15 +1865,15 @@ function _renderResolverIAResultado(view) {
       <div class="form-row">
         <label>Como foi essa questão?</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn ${r.resultado === 'certa' ? 'btn-primary' : ''}" data-resultado="certa">✅ Acertei</button>
-          <button class="btn ${r.resultado === 'errada' ? 'btn-primary' : ''}" data-resultado="errada">❌ Errei</button>
-          <button class="btn ${r.resultado === 'branco' ? 'btn-primary' : ''}" data-resultado="branco">⬜ Deixei em branco</button>
+          <button class="btn btn-sm ${r.resultado === 'certa' ? 'btn-primary' : ''}" data-resultado="certa">✅ Acertei</button>
+          <button class="btn btn-sm ${r.resultado === 'errada' ? 'btn-primary' : ''}" data-resultado="errada">❌ Errei</button>
+          <button class="btn btn-sm ${r.resultado === 'branco' ? 'btn-primary' : ''}" data-resultado="branco">⬜ Deixei em branco</button>
         </div>
       </div>
 
       <div class="modal-actions" style="margin-top:16px;">
-        <button class="btn btn-ghost" id="btn-descartar-ia">Descartar</button>
-        <button class="btn btn-primary btn-block" id="btn-salvar-ia" ${(!r.resultado) ? 'disabled' : ''}>Salvar e ir pra próxima questão</button>
+        <button class="btn btn-ghost btn-sm" id="btn-descartar-ia">Descartar</button>
+        <button class="btn btn-primary btn-sm" id="btn-salvar-ia" ${(!r.resultado) ? 'disabled' : ''}>Salvar e ir pra próxima questão</button>
       </div>
     </div>
   `;
@@ -2131,7 +2131,7 @@ function renderCaderno(view) {
                   ${r.enviadoAnki ? '✓ Enviado ao Anki' : 'Enviar pro Anki'}
                 </button>
               </div>
-              <p style="line-height:1.5;font-size:13.5px;color:var(--text);margin:8px 0;">${escapeHtml(r.textoBruto)}</p>
+              <p style="line-height:1.6;font-size:13.5px;color:var(--text);margin:8px 0;white-space:pre-wrap;">${escapeHtml(r.textoBruto)}</p>
               ${r.textoCondensado ? `<div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:13px;margin-top:10px;">📎 ${escapeHtml(r.textoCondensado)}</div>` : ''}
             </div>
           `; }).join('')}
