@@ -94,9 +94,12 @@ button{ font-family:inherit; cursor:pointer; }
 .sidebar.collapsed .nav-group-toggle span,
 .sidebar.collapsed .chev,
 .sidebar.collapsed .nav-submenu,
-.sidebar.collapsed .streak-mini span{ display:none; }
+.sidebar.collapsed .streak-mini span,
+.sidebar.collapsed .conta-btn span{ display:none; }
 .sidebar.collapsed .nav-item,
 .sidebar.collapsed .nav-group-toggle{ justify-content:center; }
+.sidebar.collapsed .streak-mini{ justify-content:center; padding:10px; }
+.sidebar.collapsed .conta-btn{ padding:10px; }
 
 .sidebar-head{
   display:flex;

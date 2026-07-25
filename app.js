@@ -59,6 +59,65 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+/** Converte o Markdown simples que a IA gera (ver _montarPromptResumo) em
+ *  HTML pra exibição — só entende o que a IA realmente usa: cabeçalhos
+ *  "### ", negrito "**texto**", listas com "- " ou "1. ", e parágrafos
+ *  separados por linha em branco. SEMPRE escapa o texto antes de aplicar
+ *  qualquer marcação (via escapeHtml), então não há risco de HTML/script
+ *  vindo da resposta da IA. Usada só pro campo "bruto"/"textoBruto" — o
+ *  "condensado" continua sendo exibido com escapeHtml puro, sem isso. */
+function renderizarMarkdownBasico(texto) {
+  const linhas = escapeHtml(texto || '').split('\n');
+  let html = '';
+  let listaAtual = null; // 'ul' | 'ol' | null
+  let paragrafoAtual = [];
+
+  const inline = (txt) => txt.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  const fecharParagrafo = () => {
+    if (paragrafoAtual.length) {
+      html += `<p style="margin:0 0 10px;">${paragrafoAtual.join(' ')}</p>`;
+      paragrafoAtual = [];
+    }
+  };
+  const fecharLista = () => {
+    if (listaAtual) { html += `</${listaAtual}>`; listaAtual = null; }
+  };
+
+  linhas.forEach((linhaOriginal) => {
+    const linha = linhaOriginal.trim();
+    if (!linha) { fecharParagrafo(); fecharLista(); return; }
+
+    const heading = linha.match(/^###\s+(.*)$/);
+    if (heading) {
+      fecharParagrafo(); fecharLista();
+      html += `<h4 style="margin:16px 0 8px;font-size:14.5px;color:var(--gold);">${inline(heading[1])}</h4>`;
+      return;
+    }
+
+    const itemUl = linha.match(/^[-•]\s+(.*)$/);
+    if (itemUl) {
+      fecharParagrafo();
+      if (listaAtual !== 'ul') { fecharLista(); html += '<ul style="margin:0 0 10px;padding-left:20px;">'; listaAtual = 'ul'; }
+      html += `<li style="margin-bottom:4px;">${inline(itemUl[1])}</li>`;
+      return;
+    }
+
+    const itemOl = linha.match(/^\d+[.)]\s+(.*)$/);
+    if (itemOl) {
+      fecharParagrafo();
+      if (listaAtual !== 'ol') { fecharLista(); html += '<ol style="margin:0 0 10px;padding-left:20px;">'; listaAtual = 'ol'; }
+      html += `<li style="margin-bottom:4px;">${inline(itemOl[1])}</li>`;
+      return;
+    }
+
+    fecharLista();
+    paragrafoAtual.push(inline(linha));
+  });
+  fecharParagrafo();
+  fecharLista();
+  return html;
+}
+
 function showToast(msg, type = '') {
   const root = $('#toast-root');
   const el = document.createElement('div');
@@ -327,11 +386,11 @@ function updateActiveNav(route) {
   $$('.nav-item[data-route], .nav-submenu a[data-route]').forEach(a => {
     a.classList.toggle('active', a.dataset.route === route);
   });
-  // Abre o submenu de estatísticas se a rota atual estiver dentro dele
-  if (route.startsWith('estatisticas/')) {
-    $('.nav-group[data-group]')?.classList.add('open');
-    $('.nav-group')?.classList.add('open');
-  }
+  // Abre automaticamente o submenu (Estatísticas / Configurações) que contém a rota atual
+  $$('.nav-group').forEach(group => {
+    const contemRota = $$('.nav-submenu a[data-route]', group).some(a => a.dataset.route === route);
+    if (contemRota) group.classList.add('open');
+  });
 }
 
 /* ============================================================
@@ -1649,7 +1708,29 @@ ${gabaritoOficial
     : 'GABARITO: não informado — analise a questão e indique qual alternativa você acredita ser a correta. Isso é só uma sugestão, pode estar errada.'}
 
 Gere:
-1. "bruto": uma explicação COMPLETA e aprofundada da teoria por trás da questão — do nível que você daria numa aula de verdade, não um resumo raso. Não tenha medo de escrever vários parágrafos se o tema exigir. Cubra: (a) o conceito central e sua base legal/doutrinária quando aplicável; (b) por que a alternativa correta está certa E por que as principais alternativas erradas estão erradas (isso costuma ser o que mais ajuda a fixar); (c) exemplos, pegadinhas comuns de banca sobre esse tema, ou uma regra prática/mnemônico se existir um bom. Escreva como se o aluno NUNCA tivesse visto o assunto — não presuma conhecimento prévio. Só corte informação se ela for irrelevante pro tema; não corte por medo de ser longo.
+1. "bruto": a explicação da questão, em Markdown, seguindo EXATAMENTE um dos dois formatos abaixo — escolha o formato olhando o tipo de alternativas do enunciado:
+
+── Se a questão tem alternativas A) a E) (múltipla escolha) ──
+"A alternativa correta é a [LETRA]) [texto da alternativa correta]."
+
+### Por que esta é a resposta correta?
+[Parágrafo(s) explicando o conceito por trás da alternativa correta, aplicado ESPECIFICAMENTE ao enunciado — não uma explicação genérica do tema.]
+
+### Por que as outras alternativas estão incorretas?
+- **[LETRA]) [texto da alternativa]:** [por que está errada]
+(repita uma linha "- **LETRA) texto:**" pra cada alternativa errada, na ordem do enunciado)
+
+── Se a questão é Certo/Errado (C/E) ──
+"A alternativa correta é [LETRA]) [Certo/Errado]."
+
+### Por que a afirmação está [certa/errada]?
+[Parágrafo de abertura situando o problema.]
+
+[Se houver mais de um motivo relevante, numere: "Existem [N] motivos principais para isso:" seguido de "1. **[nome curto do motivo]:** [explicação]" pra cada um. Se for só um motivo central, não force uma lista — escreva em prosa corrida.]
+
+**[Nome de uma regra/princípio geral relacionado ao tema, ex: "Regra de ouro em Data Viz"]:** [parágrafo final generalizando o conceito além dessa questão específica, pra fixar o aprendizado.]
+
+Em ambos os formatos: mantenha o mesmo nível de profundidade e comprimento de uma explicação de aula de verdade — não resuma demais, não tenha medo de escrever vários parágrafos se o tema exigir. Mas também não force uma seção (como o parágrafo final de regra geral) se não fizer sentido pro conteúdo específico da questão. Cubra sempre: (a) o conceito central e sua base legal/doutrinária quando aplicável; (b) por que a correta está certa E por que as erradas estão erradas — isso costuma ser o que mais ajuda a fixar; (c) exemplos ou pegadinhas comuns de banca sobre o tema, quando fizer sentido. Escreva como se o aluno NUNCA tivesse visto o assunto — não presuma conhecimento prévio. Só corte informação se ela for irrelevante pro tema; não corte por medo de ser longo.
 2. "condensado": versão ultra-compacta, estilo "Comp. privativa U = art.22 · Comum = art.23 (todos entes) · Concorrente = art.24" — frases curtas separadas por "·", sem pergunta, sem introdução, só o essencial pra fixação (esse SIM deve ser curto — é o "bruto" que precisa ser completo).
 ${gabaritoOficial ? '' : '3. "gabaritoSugerido": a letra/valor da alternativa que você acredita ser a correta, ou null se não der pra determinar.'}
 
@@ -1846,7 +1927,7 @@ function _renderResolverIAResultado(view) {
         : `<span class="badge muted" style="margin-bottom:10px;display:inline-block;">🤖 IA sugere: ${escapeHtml(r.gabaritoSugerido || '—')} (confirme antes de salvar)</span>`
       }
 
-      <p class="texto-resumo-bruto" style="line-height:1.6;font-size:13.5px;color:var(--text);margin:8px 0 14px;white-space:pre-wrap;">${escapeHtml(r.bruto)}</p>
+      <div class="texto-resumo-bruto" style="line-height:1.6;font-size:13.5px;color:var(--text);margin:8px 0 14px;">${renderizarMarkdownBasico(r.bruto)}</div>
 
       <div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:13px;margin-bottom:16px;">
         📎 ${escapeHtml(r.condensado)}
@@ -2131,7 +2212,7 @@ function renderCaderno(view) {
                   ${r.enviadoAnki ? '✓ Enviado ao Anki' : 'Enviar pro Anki'}
                 </button>
               </div>
-              <p style="line-height:1.6;font-size:13.5px;color:var(--text);margin:8px 0;white-space:pre-wrap;">${escapeHtml(r.textoBruto)}</p>
+              <div style="line-height:1.6;font-size:13.5px;color:var(--text);margin:8px 0;">${renderizarMarkdownBasico(r.textoBruto)}</div>
               ${r.textoCondensado ? `<div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:13px;margin-top:10px;">📎 ${escapeHtml(r.textoCondensado)}</div>` : ''}
             </div>
           `; }).join('')}

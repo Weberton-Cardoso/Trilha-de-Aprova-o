@@ -56,10 +56,6 @@
         <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 4a2 2 0 012-2h11a3 3 0 013 3v13a2 2 0 01-2 2H6a2 2 0 01-2-2v-.5c0-.28.22-.5.5-.5H17a1 1 0 001-1V5a1 1 0 00-1-1H6a2 2 0 00-2 2zm0 2.5V17a2 2 0 002 2h9.09c-.06-.16-.09-.32-.09-.5V6H6a2 2 0 00-2 .5z"/></svg>
         <span>Caderno de Resumos</span>
       </a>
-      <a href="#/importar-historico" class="nav-item" data-route="importar-historico">
-        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 4h16v2H4zm2 4h12v2H6zm-2 4h16v2H4zm3 4h10v2H7z"/></svg>
-        <span>Importar Histórico</span>
-      </a>
       <a href="#/ciclo" class="nav-item" data-route="ciclo">
         <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 4V1L7 6l5 5V7c3.3 0 6 2.7 6 6 0 1-.25 1.94-.7 2.76l1.46 1.46A7.93 7.93 0 0020 13c0-4.42-3.58-8-8-8zm0 14c-3.3 0-6-2.7-6-6 0-1 .25-1.94.7-2.76L5.24 7.78A7.93 7.93 0 004 13c0 4.42 3.58 8 8 8v3l5-5-5-5z"/></svg>
         <span>Ciclo de Estudos</span>
@@ -83,10 +79,6 @@
         <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6 2h9l5 5v13a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2zm8 1.5V8h4.5z"/></svg>
         <span>Editais</span>
       </a>
-      <a href="#/editais/importar" class="nav-item" data-route="editais/importar">
-        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 3a1 1 0 011 1v9.6l3.3-3.3a1 1 0 111.4 1.4l-5 5a1 1 0 01-1.4 0l-5-5a1 1 0 111.4-1.4l3.3 3.3V4a1 1 0 011-1zM5 19a1 1 0 011-1h12a1 1 0 110 2H6a1 1 0 01-1-1z"/></svg>
-        <span>Importar Edital</span>
-      </a>
       <a href="#/simulados" class="nav-item" data-route="simulados">
         <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2l7 4v6c0 5-3.4 8.6-7 10-3.6-1.4-7-5-7-10V6z"/></svg>
         <span>Simulados</span>
@@ -95,10 +87,18 @@
         <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4.4 0-8 2.24-8 5v2h16v-2c0-2.76-3.6-5-8-5z"/></svg>
         <span>Perfis</span>
       </a>
-      <a href="#/configuracoes" class="nav-item" data-route="configuracoes">
-        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19.14 12.94a7.14 7.14 0 000-1.88l2.03-1.58a.5.5 0 00.12-.64l-1.92-3.32a.5.5 0 00-.6-.22l-2.39.96a7.3 7.3 0 00-1.63-.94l-.36-2.54a.5.5 0 00-.5-.42h-3.84a.5.5 0 00-.5.42l-.36 2.54c-.59.24-1.14.56-1.63.94l-2.39-.96a.5.5 0 00-.6.22L2.7 8.84a.5.5 0 00.12.64l2.03 1.58a7.14 7.14 0 000 1.88L2.82 14.5a.5.5 0 00-.12.64l1.92 3.32c.14.24.42.32.6.22l2.39-.96c.49.38 1.04.7 1.63.94l.36 2.54c.05.24.26.42.5.42h3.84c.24 0 .45-.18.5-.42l.36-2.54c.59-.24 1.14-.56 1.63-.94l2.39.96c.24.1.5 0 .6-.22l1.92-3.32a.5.5 0 00-.12-.64zM12 15.5a3.5 3.5 0 110-7 3.5 3.5 0 010 7z"/></svg>
-        <span>Configurações</span>
-      </a>
+      <div class="nav-group">
+        <button class="nav-item nav-group-toggle" data-group="configuracoes">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19.14 12.94a7.14 7.14 0 000-1.88l2.03-1.58a.5.5 0 00.12-.64l-1.92-3.32a.5.5 0 00-.6-.22l-2.39.96a7.3 7.3 0 00-1.63-.94l-.36-2.54a.5.5 0 00-.5-.42h-3.84a.5.5 0 00-.5.42l-.36 2.54c-.59.24-1.14.56-1.63.94l-2.39-.96a.5.5 0 00-.6.22L2.7 8.84a.5.5 0 00.12.64l2.03 1.58a7.14 7.14 0 000 1.88L2.82 14.5a.5.5 0 00-.12.64l1.92 3.32c.14.24.42.32.6.22l2.39-.96c.49.38 1.04.7 1.63.94l.36 2.54c.05.24.26.42.5.42h3.84c.24 0 .45-.18.5-.42l.36-2.54c.59-.24 1.14-.56 1.63-.94l2.39.96c.24.1.5 0 .6-.22l1.92-3.32a.5.5 0 00-.12-.64zM12 15.5a3.5 3.5 0 110-7 3.5 3.5 0 010 7z"/></svg>
+          <span>Configurações</span>
+          <svg class="chev" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M7 10l5 5 5-5z"/></svg>
+        </button>
+        <div class="nav-submenu" data-submenu="configuracoes">
+          <a href="#/configuracoes" data-route="configuracoes">Geral</a>
+          <a href="#/importar-historico" data-route="importar-historico">Importar Histórico</a>
+          <a href="#/editais/importar" data-route="editais/importar">Importar Edital</a>
+        </div>
+      </div>
     </nav>
 
     <div class="sidebar-foot">
