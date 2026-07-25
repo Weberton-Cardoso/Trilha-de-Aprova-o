@@ -52,88 +52,11 @@ function fmtPctSigned(n) {
   return `${sinal}${n.toFixed(1)} p.p.`;
 }
 
-/** Ícones (SVG inline) usados nos cards de estatística do Dashboard, dentro
- *  de um círculo colorido — visual em linha com os prints de referência.
- *  `tom` controla a cor de fundo/ícone: 'gold' | 'success' | 'danger' | 'info' | 'muted'. */
-const _STAT_ICONS_SVG = {
-  total: '<path fill="currentColor" d="M4 4h16v2H4zm0 6h16v2H4zm0 6h10v2H4z"/>',
-  check: '<path fill="currentColor" d="M9 16.2l-3.5-3.6L4 14.1l5 5.1L20 8.1l-1.5-1.5z"/>',
-  x: '<path fill="currentColor" d="M6.4 5L5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4L13.4 12 19 6.4 17.6 5 12 10.6z"/>',
-  target: '<path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 17a7 7 0 110-14 7 7 0 010 14zm0-11a4 4 0 100 8 4 4 0 000-8zm0 6a2 2 0 110-4 2 2 0 010 4z"/>',
-  list: '<path fill="currentColor" d="M4 4h16v12H7l-3 3V4z"/>',
-  trend: '<path fill="currentColor" d="M3 17l6-6 4 4 8-8v3h2V4h-6v2h3l-7 7-4-4-7 7z"/>',
-  fire: '<path fill="currentColor" d="M12 2c1 3-2 4-2 7a4 4 0 108 0c0-1-1-1.5-1-1.5.5 2-1 3-2 3a2.5 2.5 0 01-1-4.8C15 4 12 2 12 2zM8 14a4 4 0 108 0c0 3-2 3-2 5a2 2 0 01-4 0c0-2 1-3-2-5z"/>',
-  clock: '<path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 10.4l4.2 2.5-.8 1.3-5-3V6h1.6z"/>'
-};
-function _statIcon(nome, tom = 'muted') {
-  const svg = _STAT_ICONS_SVG[nome] || _STAT_ICONS_SVG.total;
-  return `<div class="stat-card-icon tom-${tom}"><svg viewBox="0 0 24 24" width="18" height="18">${svg}</svg></div>`;
-}
-
 function escapeHtml(str) {
   if (str === undefined || str === null) return '';
   return String(str)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
-}
-
-/** Converte o Markdown simples que a IA gera (ver _montarPromptResumo) em
- *  HTML pra exibição — só entende o que a IA realmente usa: cabeçalhos
- *  "### ", negrito "**texto**", listas com "- " ou "1. ", e parágrafos
- *  separados por linha em branco. SEMPRE escapa o texto antes de aplicar
- *  qualquer marcação (via escapeHtml), então não há risco de HTML/script
- *  vindo da resposta da IA. Usada só pro campo "bruto"/"textoBruto" — o
- *  "condensado" continua sendo exibido com escapeHtml puro, sem isso. */
-function renderizarMarkdownBasico(texto) {
-  const linhas = escapeHtml(texto || '').split('\n');
-  let html = '';
-  let listaAtual = null; // 'ul' | 'ol' | null
-  let paragrafoAtual = [];
-
-  const inline = (txt) => txt.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  const fecharParagrafo = () => {
-    if (paragrafoAtual.length) {
-      html += `<p style="margin:0 0 10px;">${paragrafoAtual.join(' ')}</p>`;
-      paragrafoAtual = [];
-    }
-  };
-  const fecharLista = () => {
-    if (listaAtual) { html += `</${listaAtual}>`; listaAtual = null; }
-  };
-
-  linhas.forEach((linhaOriginal) => {
-    const linha = linhaOriginal.trim();
-    if (!linha) { fecharParagrafo(); fecharLista(); return; }
-
-    const heading = linha.match(/^###\s+(.*)$/);
-    if (heading) {
-      fecharParagrafo(); fecharLista();
-      html += `<h4 style="margin:16px 0 8px;font-size:14.5px;color:var(--gold);">${inline(heading[1])}</h4>`;
-      return;
-    }
-
-    const itemUl = linha.match(/^[-•]\s+(.*)$/);
-    if (itemUl) {
-      fecharParagrafo();
-      if (listaAtual !== 'ul') { fecharLista(); html += '<ul style="margin:0 0 10px;padding-left:20px;">'; listaAtual = 'ul'; }
-      html += `<li style="margin-bottom:4px;">${inline(itemUl[1])}</li>`;
-      return;
-    }
-
-    const itemOl = linha.match(/^\d+[.)]\s+(.*)$/);
-    if (itemOl) {
-      fecharParagrafo();
-      if (listaAtual !== 'ol') { fecharLista(); html += '<ol style="margin:0 0 10px;padding-left:20px;">'; listaAtual = 'ol'; }
-      html += `<li style="margin-bottom:4px;">${inline(itemOl[1])}</li>`;
-      return;
-    }
-
-    fecharLista();
-    paragrafoAtual.push(inline(linha));
-  });
-  fecharParagrafo();
-  fecharLista();
-  return html;
 }
 
 function showToast(msg, type = '') {
@@ -404,11 +327,11 @@ function updateActiveNav(route) {
   $$('.nav-item[data-route], .nav-submenu a[data-route]').forEach(a => {
     a.classList.toggle('active', a.dataset.route === route);
   });
-  // Abre automaticamente o submenu (Estatísticas / Configurações) que contém a rota atual
-  $$('.nav-group').forEach(group => {
-    const contemRota = $$('.nav-submenu a[data-route]', group).some(a => a.dataset.route === route);
-    if (contemRota) group.classList.add('open');
-  });
+  // Abre o submenu de estatísticas se a rota atual estiver dentro dele
+  if (route.startsWith('estatisticas/')) {
+    $('.nav-group[data-group]')?.classList.add('open');
+    $('.nav-group')?.classList.add('open');
+  }
 }
 
 /* ============================================================
@@ -753,29 +676,21 @@ function renderDashboard(view) {
     </div>
 
     <div class="stat-grid">
-      <div class="stat-card">${_statIcon('total', 'muted')}<div class="stat-card-body"><div class="label">Total de questões</div><div class="value">${resumo.total}</div></div></div>
-      <div class="stat-card success">${_statIcon('check', 'success')}<div class="stat-card-body"><div class="label">Questões certas</div><div class="value">${resumo.certas}</div></div></div>
-      <div class="stat-card danger">${_statIcon('x', 'danger')}<div class="stat-card-body"><div class="label">Questões erradas</div><div class="value">${resumo.erradas}</div></div></div>
-      <div class="stat-card gold">${_statIcon('target', 'gold')}<div class="stat-card-body"><div class="label">Taxa de acerto</div><div class="value">${fmtPct(resumo.taxa)}</div></div></div>
-      <div class="stat-card info">${_statIcon('list', 'info')}<div class="stat-card-body"><div class="label">Tentativas registradas</div><div class="value">${resumo.tentativas}</div></div></div>
-      <div class="stat-card">${_statIcon('trend', 'muted')}<div class="stat-card-body"><div class="label">Média de questões/dia</div><div class="value">${mediaDiaria.toFixed(1)}</div></div></div>
-      <div class="stat-card gold">${_statIcon('fire', 'gold')}<div class="stat-card-body"><div class="label">Sequência de dias</div><div class="value">${streak} 🔥</div></div></div>
+      <div class="stat-card"><div class="label">Total de questões</div><div class="value">${resumo.total}</div></div>
+      <div class="stat-card success"><div class="label">Questões certas</div><div class="value">${resumo.certas}</div></div>
+      <div class="stat-card danger"><div class="label">Questões erradas</div><div class="value">${resumo.erradas}</div></div>
+      <div class="stat-card gold"><div class="label">Taxa de acerto</div><div class="value">${fmtPct(resumo.taxa)}</div></div>
+      <div class="stat-card info"><div class="label">Tentativas registradas</div><div class="value">${resumo.tentativas}</div></div>
+      <div class="stat-card"><div class="label">Média de questões/dia</div><div class="value">${mediaDiaria.toFixed(1)}</div></div>
+      <div class="stat-card gold"><div class="label">Sequência de dias</div><div class="value">${streak} 🔥</div></div>
+      <div class="stat-card info"><div class="label">Tempo total estudado</div><div class="value">${_formatarMinutos(minutosTotalCiclo)}</div></div>
     </div>
 
-    <div class="card info-wide-card mb-12">
-      ${_statIcon('clock', 'info')}
-      <div class="stat-card-body">
-        <div class="label">Tempo total estudado</div>
-        <div class="value">${_formatarMinutos(minutosTotalCiclo)}</div>
-      </div>
-    </div>
+    <div class="card mb-12" id="card-relatorio-diario"></div>
+
+    <div class="card mb-12" id="card-prioridade-revisao"></div>
 
     <div class="grid-2 mb-12">
-      <div class="card" id="card-relatorio-diario"></div>
-      <div class="card" id="card-prioridade-revisao"></div>
-    </div>
-
-    <div class="grid-3 mb-12">
       <div class="card">
         <div class="card-title">Acertos × Erros</div>
         <div class="chart-wrap"><canvas id="chart-pizza"></canvas></div>
@@ -784,21 +699,21 @@ function renderDashboard(view) {
         <div class="card-title">Questões por disciplina</div>
         <div class="chart-wrap"><canvas id="chart-barras"></canvas></div>
       </div>
-      <div class="card">
-        <div class="card-title">Evolução — últimos dias</div>
-        <div class="chart-wrap"><canvas id="chart-linha"></canvas></div>
+    </div>
+
+    <div class="card mb-12">
+      <div class="card-title">Evolução — últimos dias</div>
+      <div class="chart-wrap tall"><canvas id="chart-linha"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Trilha de estudo — últimos 30 dias</div>
+      <div class="streak-strip">
+        ${trilha.map(d => `<div class="streak-dot" data-level="${nivelStreakDot(d)}" title="${toBRDate(d.iso)} · ${d.count} questão(ões)"></div>`).join('')}
       </div>
     </div>
 
-    <div class="grid-2 mb-12">
-      <div class="card" id="card-tempo-por-tipo-ciclo"></div>
-      <div class="card">
-        <div class="card-title">Trilha de estudo — últimos 30 dias</div>
-        <div class="streak-strip">
-          ${trilha.map(d => `<div class="streak-dot" data-level="${nivelStreakDot(d)}" title="${toBRDate(d.iso)} · ${d.count} questão(ões)"></div>`).join('')}
-        </div>
-      </div>
-    </div>
+    <div class="card mt-12" id="card-tempo-por-tipo-ciclo"></div>
 
     <div class="card mt-12" id="card-correlacao-tipo-taxa"></div>
 
@@ -1734,34 +1649,82 @@ ${gabaritoOficial
     : 'GABARITO: não informado — analise a questão e indique qual alternativa você acredita ser a correta. Isso é só uma sugestão, pode estar errada.'}
 
 Gere:
-1. "bruto": a explicação da questão, em Markdown, seguindo EXATAMENTE um dos dois formatos abaixo — escolha o formato olhando o tipo de alternativas do enunciado:
 
-── Se a questão tem alternativas A) a E) (múltipla escolha) ──
-"A alternativa correta é a [LETRA]) [texto da alternativa correta]."
+1. "bruto": explicação COMPLETA e estruturada, no formato abaixo (é o formato que costuma sair melhor pra fixação — siga à risca):
 
-### Por que esta é a resposta correta?
-[Parágrafo(s) explicando o conceito por trás da alternativa correta, aplicado ESPECIFICAMENTE ao enunciado — não uma explicação genérica do tema.]
+   - Comece com um parágrafo curto direto: **Por que esta é a resposta correta?** seguido da explicação de por que a alternativa certa está certa (base legal/doutrinária/conceitual, sem economizar detalhe).
+   - Se a questão for de múltipla escolha (A a E): depois adicione **Por que as outras alternativas estão incorretas?** seguido de uma lista com um item por alternativa errada, cada um começando com "- **LETRA) nome curto da alternativa:** " e a explicação de por que ela está errada.
+   - Se a questão for Certo/Errado (Cebraspe): em vez da lista de alternativas, adicione **Por que a afirmação está [certa/errada]?** com uma lista numerada ("1. ", "2. ", "3. "...) dos motivos, cada um com um termo em negrito no início (ex.: "1. **Nome do motivo:** explicação").
+   - Feche (em qualquer um dos dois formatos) com um parágrafo iniciado por **Regra de ouro / Resumo prático:** trazendo uma regra prática, mnemônico ou dica de prova sobre o tema, quando fizer sentido existir uma.
+   - Use "**texto**" para negrito e "- " ou "N. " pra itens de lista — não use nenhuma outra marcação (sem #, sem \`código\`, sem links). Cada cabeçalho em negrito (ex.: "**Por que esta é a resposta correta?**") deve ficar SOZINHO na própria linha, com uma linha em branco antes e depois dele — nunca na mesma linha do parágrafo que vem a seguir. Separe parágrafos comuns entre si também com uma linha em branco.
+   - Não tenha medo de escrever bastante se o tema exigir — não corte informação relevante por medo de ser longo. Escreva como se o aluno nunca tivesse visto o assunto.
 
-### Por que as outras alternativas estão incorretas?
-- **[LETRA]) [texto da alternativa]:** [por que está errada]
-(repita uma linha "- **LETRA) texto:**" pra cada alternativa errada, na ordem do enunciado)
-
-── Se a questão é Certo/Errado (C/E) ──
-"A alternativa correta é [LETRA]) [Certo/Errado]."
-
-### Por que a afirmação está [certa/errada]?
-[Parágrafo de abertura situando o problema.]
-
-[Se houver mais de um motivo relevante, numere: "Existem [N] motivos principais para isso:" seguido de "1. **[nome curto do motivo]:** [explicação]" pra cada um. Se for só um motivo central, não force uma lista — escreva em prosa corrida.]
-
-**[Nome de uma regra/princípio geral relacionado ao tema, ex: "Regra de ouro em Data Viz"]:** [parágrafo final generalizando o conceito além dessa questão específica, pra fixar o aprendizado.]
-
-Em ambos os formatos: mantenha o mesmo nível de profundidade e comprimento de uma explicação de aula de verdade — não resuma demais, não tenha medo de escrever vários parágrafos se o tema exigir. Mas também não force uma seção (como o parágrafo final de regra geral) se não fizer sentido pro conteúdo específico da questão. Cubra sempre: (a) o conceito central e sua base legal/doutrinária quando aplicável; (b) por que a correta está certa E por que as erradas estão erradas — isso costuma ser o que mais ajuda a fixar; (c) exemplos ou pegadinhas comuns de banca sobre o tema, quando fizer sentido. Escreva como se o aluno NUNCA tivesse visto o assunto — não presuma conhecimento prévio. Só corte informação se ela for irrelevante pro tema; não corte por medo de ser longo.
-2. "condensado": versão ultra-compacta, estilo "Comp. privativa U = art.22 · Comum = art.23 (todos entes) · Concorrente = art.24" — frases curtas separadas por "·", sem pergunta, sem introdução, só o essencial pra fixação (esse SIM deve ser curto — é o "bruto" que precisa ser completo).
+2. "condensado": versão ultra-compacta, estilo "Comp. privativa U = art.22 · Comum = art.23 (todos entes) · Concorrente = art.24" — frases curtas separadas por "·", sem pergunta, sem negrito, sem lista, só o essencial pra fixação (esse SIM deve ser curto — é o "bruto" que precisa ser completo e estruturado).
 ${gabaritoOficial ? '' : '3. "gabaritoSugerido": a letra/valor da alternativa que você acredita ser a correta, ou null se não der pra determinar.'}
 
-Responda SOMENTE em JSON válido, sem markdown, sem texto fora do JSON:
+Responda SOMENTE em JSON válido, sem markdown fora dos campos, sem texto fora do JSON:
 {"bruto": "...", "condensado": "..."${gabaritoOficial ? '' : ', "gabaritoSugerido": "..."'}}`;
+}
+
+/** Conversor mínimo e seguro de um subconjunto de markdown pra HTML: negrito
+ *  (**texto**), listas com "- " ou "N. ", e parágrafos separados por linha
+ *  em branco — é exatamente (e só) o que _montarPromptResumo pede pra IA
+ *  gerar. SEMPRE escapa o texto primeiro (escapeHtml) e só depois interpreta
+ *  os marcadores nesse texto já escapado — então não existe risco de HTML
+ *  ou script vindo da resposta da IA virar HTML de verdade na tela; o pior
+ *  caso é um "**" ou "-" sobrando sem formatar. */
+function _mdParaHtml(texto) {
+  const linhas = escapeHtml(texto || '').split('\n');
+  const blocos = [];
+  let paragrafoAtual = [];
+  let listaAtual = null; // { tipo: 'ul'|'ol', itens: [] }
+
+  const negrito = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+  function fecharParagrafo() {
+    if (paragrafoAtual.length) {
+      blocos.push(`<p>${paragrafoAtual.join(' ')}</p>`);
+      paragrafoAtual = [];
+    }
+  }
+  function fecharLista() {
+    if (listaAtual) {
+      blocos.push(`<${listaAtual.tipo}>${listaAtual.itens.map(i => `<li>${i}</li>`).join('')}</${listaAtual.tipo}>`);
+      listaAtual = null;
+    }
+  }
+
+  linhas.forEach(linhaRaw => {
+    const linha = linhaRaw.trim();
+    if (!linha) { fecharParagrafo(); fecharLista(); return; }
+
+    const bullet = linha.match(/^-\s+(.*)/);
+    const numerado = linha.match(/^\d+\.\s+(.*)/);
+    const linhaTodaEmNegrito = linha.match(/^\*\*(.+)\*\*$/); // ex.: "**Por que...?**" sozinho na linha
+
+    if (linhaTodaEmNegrito) {
+      // Cabeçalho: fecha o que estava aberto e vira um parágrafo próprio,
+      // pra não colar visualmente no texto seguinte.
+      fecharParagrafo();
+      fecharLista();
+      blocos.push(`<p class="md-heading"><strong>${linhaTodaEmNegrito[1]}</strong></p>`);
+    } else if (bullet) {
+      fecharParagrafo();
+      if (!listaAtual || listaAtual.tipo !== 'ul') { fecharLista(); listaAtual = { tipo: 'ul', itens: [] }; }
+      listaAtual.itens.push(negrito(bullet[1]));
+    } else if (numerado) {
+      fecharParagrafo();
+      if (!listaAtual || listaAtual.tipo !== 'ol') { fecharLista(); listaAtual = { tipo: 'ol', itens: [] }; }
+      listaAtual.itens.push(negrito(numerado[1]));
+    } else {
+      fecharLista();
+      paragrafoAtual.push(negrito(linha));
+    }
+  });
+  fecharParagrafo();
+  fecharLista();
+
+  return blocos.join('');
 }
 
 /** Chama a IA e devolve { bruto, condensado, gabaritoSugerido }. Lança erro
@@ -1953,7 +1916,7 @@ function _renderResolverIAResultado(view) {
         : `<span class="badge muted" style="margin-bottom:10px;display:inline-block;">🤖 IA sugere: ${escapeHtml(r.gabaritoSugerido || '—')} (confirme antes de salvar)</span>`
       }
 
-      <div class="texto-resumo-bruto" style="line-height:1.6;font-size:13.5px;color:var(--text);margin:8px 0 14px;">${renderizarMarkdownBasico(r.bruto)}</div>
+      <div class="texto-resumo-bruto" style="line-height:1.6;font-size:13.5px;color:var(--text);margin:8px 0 14px;">${_mdParaHtml(r.bruto)}</div>
 
       <div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:13px;margin-bottom:16px;">
         📎 ${escapeHtml(r.condensado)}
@@ -2238,7 +2201,7 @@ function renderCaderno(view) {
                   ${r.enviadoAnki ? '✓ Enviado ao Anki' : 'Enviar pro Anki'}
                 </button>
               </div>
-              <div style="line-height:1.6;font-size:13.5px;color:var(--text);margin:8px 0;">${renderizarMarkdownBasico(r.textoBruto)}</div>
+              <div style="line-height:1.6;font-size:13.5px;color:var(--text);margin:8px 0;">${_mdParaHtml(r.textoBruto)}</div>
               ${r.textoCondensado ? `<div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:13px;margin-top:10px;">📎 ${escapeHtml(r.textoCondensado)}</div>` : ''}
             </div>
           `; }).join('')}

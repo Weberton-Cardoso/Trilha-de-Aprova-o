@@ -94,12 +94,9 @@ button{ font-family:inherit; cursor:pointer; }
 .sidebar.collapsed .nav-group-toggle span,
 .sidebar.collapsed .chev,
 .sidebar.collapsed .nav-submenu,
-.sidebar.collapsed .streak-mini span,
-.sidebar.collapsed .conta-btn span{ display:none; }
+.sidebar.collapsed .streak-mini span{ display:none; }
 .sidebar.collapsed .nav-item,
 .sidebar.collapsed .nav-group-toggle{ justify-content:center; }
-.sidebar.collapsed .streak-mini{ justify-content:center; padding:10px; }
-.sidebar.collapsed .conta-btn{ padding:10px; }
 
 .sidebar-head{
   display:flex;
@@ -256,34 +253,16 @@ button{ font-family:inherit; cursor:pointer; }
 }
 .stat-card{
   background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
-  padding:16px 18px; animation:fadeUp .35s var(--ease);
-  display:flex; align-items:flex-start; gap:12px;
+  padding:18px; animation:fadeUp .35s var(--ease);
 }
-.stat-card-body{ min-width:0; }
 .stat-card .label{ font-size:12.5px; color:var(--text-muted); font-weight:500; }
 .stat-card .value{
-  font-family:var(--font-mono); font-size:24px; font-weight:600; margin-top:5px;
+  font-family:var(--font-mono); font-size:26px; font-weight:600; margin-top:6px;
 }
 .stat-card.gold .value{ color:var(--gold); }
 .stat-card.success .value{ color:var(--success); }
 .stat-card.danger .value{ color:var(--danger); }
 .stat-card.info .value{ color:var(--info); }
-
-.stat-card-icon{
-  flex:none; width:38px; height:38px; border-radius:11px;
-  display:flex; align-items:center; justify-content:center;
-}
-.stat-card-icon.tom-gold{ background:var(--gold-soft); color:var(--gold); }
-.stat-card-icon.tom-success{ background:var(--success-soft); color:var(--success); }
-.stat-card-icon.tom-danger{ background:var(--danger-soft); color:var(--danger); }
-.stat-card-icon.tom-info{ background:rgba(96,165,250,.14); color:var(--info); }
-.stat-card-icon.tom-muted{ background:var(--surface-2); color:var(--text-muted); }
-
-.info-wide-card{
-  display:flex; align-items:center; gap:14px; padding:16px 20px;
-}
-.info-wide-card .value{ font-family:var(--font-mono); font-size:22px; font-weight:600; margin-top:3px; }
-.info-wide-card .label{ font-size:12.5px; color:var(--text-muted); font-weight:500; }
 
 .grid-2{ display:grid; grid-template-columns:1.3fr 1fr; gap:16px; }
 .grid-3{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
@@ -812,3 +791,25 @@ tr.row-motivo td{ padding-top:0; padding-bottom:8px; border-top:none; }
   .caderno-layout{ grid-template-columns:1fr; }
   .caderno-sidebar{ position:static; max-height:none; }
 }
+
+/* ============================================================
+   TEXTO ESTRUTURADO DA IA (explicação em Resolver com IA / Caderno)
+   ============================================================ */
+.texto-resumo-bruto p,
+.caderno-main p{ margin:0 0 10px; }
+.texto-resumo-bruto p:last-child,
+.caderno-main p:last-child{ margin-bottom:0; }
+.texto-resumo-bruto p.md-heading,
+.caderno-main p.md-heading{ margin:16px 0 6px; font-size:14px; }
+.texto-resumo-bruto p.md-heading:first-child,
+.caderno-main p.md-heading:first-child{ margin-top:0; }
+.texto-resumo-bruto strong,
+.caderno-main strong{ color:var(--gold); font-weight:600; }
+.texto-resumo-bruto ul,
+.texto-resumo-bruto ol,
+.caderno-main ul,
+.caderno-main ol{ margin:0 0 12px; padding-left:22px; }
+.texto-resumo-bruto li,
+.caderno-main li{ margin-bottom:6px; line-height:1.5; }
+.texto-resumo-bruto li:last-child,
+.caderno-main li:last-child{ margin-bottom:0; }
