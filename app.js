@@ -52,6 +52,24 @@ function fmtPctSigned(n) {
   return `${sinal}${n.toFixed(1)} p.p.`;
 }
 
+/** Ícones (SVG inline) usados nos cards de estatística do Dashboard, dentro
+ *  de um círculo colorido — visual em linha com os prints de referência.
+ *  `tom` controla a cor de fundo/ícone: 'gold' | 'success' | 'danger' | 'info' | 'muted'. */
+const _STAT_ICONS_SVG = {
+  total: '<path fill="currentColor" d="M4 4h16v2H4zm0 6h16v2H4zm0 6h10v2H4z"/>',
+  check: '<path fill="currentColor" d="M9 16.2l-3.5-3.6L4 14.1l5 5.1L20 8.1l-1.5-1.5z"/>',
+  x: '<path fill="currentColor" d="M6.4 5L5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4L13.4 12 19 6.4 17.6 5 12 10.6z"/>',
+  target: '<path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 17a7 7 0 110-14 7 7 0 010 14zm0-11a4 4 0 100 8 4 4 0 000-8zm0 6a2 2 0 110-4 2 2 0 010 4z"/>',
+  list: '<path fill="currentColor" d="M4 4h16v12H7l-3 3V4z"/>',
+  trend: '<path fill="currentColor" d="M3 17l6-6 4 4 8-8v3h2V4h-6v2h3l-7 7-4-4-7 7z"/>',
+  fire: '<path fill="currentColor" d="M12 2c1 3-2 4-2 7a4 4 0 108 0c0-1-1-1.5-1-1.5.5 2-1 3-2 3a2.5 2.5 0 01-1-4.8C15 4 12 2 12 2zM8 14a4 4 0 108 0c0 3-2 3-2 5a2 2 0 01-4 0c0-2 1-3-2-5z"/>',
+  clock: '<path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 10.4l4.2 2.5-.8 1.3-5-3V6h1.6z"/>'
+};
+function _statIcon(nome, tom = 'muted') {
+  const svg = _STAT_ICONS_SVG[nome] || _STAT_ICONS_SVG.total;
+  return `<div class="stat-card-icon tom-${tom}"><svg viewBox="0 0 24 24" width="18" height="18">${svg}</svg></div>`;
+}
+
 function escapeHtml(str) {
   if (str === undefined || str === null) return '';
   return String(str)
@@ -735,21 +753,29 @@ function renderDashboard(view) {
     </div>
 
     <div class="stat-grid">
-      <div class="stat-card"><div class="label">Total de questões</div><div class="value">${resumo.total}</div></div>
-      <div class="stat-card success"><div class="label">Questões certas</div><div class="value">${resumo.certas}</div></div>
-      <div class="stat-card danger"><div class="label">Questões erradas</div><div class="value">${resumo.erradas}</div></div>
-      <div class="stat-card gold"><div class="label">Taxa de acerto</div><div class="value">${fmtPct(resumo.taxa)}</div></div>
-      <div class="stat-card info"><div class="label">Tentativas registradas</div><div class="value">${resumo.tentativas}</div></div>
-      <div class="stat-card"><div class="label">Média de questões/dia</div><div class="value">${mediaDiaria.toFixed(1)}</div></div>
-      <div class="stat-card gold"><div class="label">Sequência de dias</div><div class="value">${streak} 🔥</div></div>
-      <div class="stat-card info"><div class="label">Tempo total estudado</div><div class="value">${_formatarMinutos(minutosTotalCiclo)}</div></div>
+      <div class="stat-card">${_statIcon('total', 'muted')}<div class="stat-card-body"><div class="label">Total de questões</div><div class="value">${resumo.total}</div></div></div>
+      <div class="stat-card success">${_statIcon('check', 'success')}<div class="stat-card-body"><div class="label">Questões certas</div><div class="value">${resumo.certas}</div></div></div>
+      <div class="stat-card danger">${_statIcon('x', 'danger')}<div class="stat-card-body"><div class="label">Questões erradas</div><div class="value">${resumo.erradas}</div></div></div>
+      <div class="stat-card gold">${_statIcon('target', 'gold')}<div class="stat-card-body"><div class="label">Taxa de acerto</div><div class="value">${fmtPct(resumo.taxa)}</div></div></div>
+      <div class="stat-card info">${_statIcon('list', 'info')}<div class="stat-card-body"><div class="label">Tentativas registradas</div><div class="value">${resumo.tentativas}</div></div></div>
+      <div class="stat-card">${_statIcon('trend', 'muted')}<div class="stat-card-body"><div class="label">Média de questões/dia</div><div class="value">${mediaDiaria.toFixed(1)}</div></div></div>
+      <div class="stat-card gold">${_statIcon('fire', 'gold')}<div class="stat-card-body"><div class="label">Sequência de dias</div><div class="value">${streak} 🔥</div></div></div>
     </div>
 
-    <div class="card mb-12" id="card-relatorio-diario"></div>
-
-    <div class="card mb-12" id="card-prioridade-revisao"></div>
+    <div class="card info-wide-card mb-12">
+      ${_statIcon('clock', 'info')}
+      <div class="stat-card-body">
+        <div class="label">Tempo total estudado</div>
+        <div class="value">${_formatarMinutos(minutosTotalCiclo)}</div>
+      </div>
+    </div>
 
     <div class="grid-2 mb-12">
+      <div class="card" id="card-relatorio-diario"></div>
+      <div class="card" id="card-prioridade-revisao"></div>
+    </div>
+
+    <div class="grid-3 mb-12">
       <div class="card">
         <div class="card-title">Acertos × Erros</div>
         <div class="chart-wrap"><canvas id="chart-pizza"></canvas></div>
@@ -758,21 +784,21 @@ function renderDashboard(view) {
         <div class="card-title">Questões por disciplina</div>
         <div class="chart-wrap"><canvas id="chart-barras"></canvas></div>
       </div>
-    </div>
-
-    <div class="card mb-12">
-      <div class="card-title">Evolução — últimos dias</div>
-      <div class="chart-wrap tall"><canvas id="chart-linha"></canvas></div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Trilha de estudo — últimos 30 dias</div>
-      <div class="streak-strip">
-        ${trilha.map(d => `<div class="streak-dot" data-level="${nivelStreakDot(d)}" title="${toBRDate(d.iso)} · ${d.count} questão(ões)"></div>`).join('')}
+      <div class="card">
+        <div class="card-title">Evolução — últimos dias</div>
+        <div class="chart-wrap"><canvas id="chart-linha"></canvas></div>
       </div>
     </div>
 
-    <div class="card mt-12" id="card-tempo-por-tipo-ciclo"></div>
+    <div class="grid-2 mb-12">
+      <div class="card" id="card-tempo-por-tipo-ciclo"></div>
+      <div class="card">
+        <div class="card-title">Trilha de estudo — últimos 30 dias</div>
+        <div class="streak-strip">
+          ${trilha.map(d => `<div class="streak-dot" data-level="${nivelStreakDot(d)}" title="${toBRDate(d.iso)} · ${d.count} questão(ões)"></div>`).join('')}
+        </div>
+      </div>
+    </div>
 
     <div class="card mt-12" id="card-correlacao-tipo-taxa"></div>
 

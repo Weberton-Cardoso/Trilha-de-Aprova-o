@@ -256,16 +256,34 @@ button{ font-family:inherit; cursor:pointer; }
 }
 .stat-card{
   background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
-  padding:18px; animation:fadeUp .35s var(--ease);
+  padding:16px 18px; animation:fadeUp .35s var(--ease);
+  display:flex; align-items:flex-start; gap:12px;
 }
+.stat-card-body{ min-width:0; }
 .stat-card .label{ font-size:12.5px; color:var(--text-muted); font-weight:500; }
 .stat-card .value{
-  font-family:var(--font-mono); font-size:26px; font-weight:600; margin-top:6px;
+  font-family:var(--font-mono); font-size:24px; font-weight:600; margin-top:5px;
 }
 .stat-card.gold .value{ color:var(--gold); }
 .stat-card.success .value{ color:var(--success); }
 .stat-card.danger .value{ color:var(--danger); }
 .stat-card.info .value{ color:var(--info); }
+
+.stat-card-icon{
+  flex:none; width:38px; height:38px; border-radius:11px;
+  display:flex; align-items:center; justify-content:center;
+}
+.stat-card-icon.tom-gold{ background:var(--gold-soft); color:var(--gold); }
+.stat-card-icon.tom-success{ background:var(--success-soft); color:var(--success); }
+.stat-card-icon.tom-danger{ background:var(--danger-soft); color:var(--danger); }
+.stat-card-icon.tom-info{ background:rgba(96,165,250,.14); color:var(--info); }
+.stat-card-icon.tom-muted{ background:var(--surface-2); color:var(--text-muted); }
+
+.info-wide-card{
+  display:flex; align-items:center; gap:14px; padding:16px 20px;
+}
+.info-wide-card .value{ font-family:var(--font-mono); font-size:22px; font-weight:600; margin-top:3px; }
+.info-wide-card .label{ font-size:12.5px; color:var(--text-muted); font-weight:500; }
 
 .grid-2{ display:grid; grid-template-columns:1.3fr 1fr; gap:16px; }
 .grid-3{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
