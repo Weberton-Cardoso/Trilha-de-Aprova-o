@@ -100,6 +100,32 @@ const cloudSync = {
     await auth.signOut();
   },
 
+  /** Chave no localStorage (não no IndexedDB — precisa sobreviver mesmo se
+   *  os dados forem zerados/importados) com o uid da última conta Google
+   *  que sincronizou neste aparelho. Usado pra detectar troca de conta. */
+  _CHAVE_ULTIMO_UID: 'trilha_ultimo_uid_sincronizado',
+
+  /** Se este aparelho já sincronizou antes com uma conta DIFERENTE da atual
+   *  (e tem dados locais), isso é um sinal de risco: como o IndexedDB é
+   *  compartilhado por todas as abas/contas do mesmo navegador, sincronizar
+   *  agora pode misturar dados de duas contas do Google diferentes. Pede
+   *  confirmação explícita nesse caso, em vez de seguir em frente sozinho. */
+  async _confirmarSeTrocouDeConta(uidAtual, totalLocalAtual) {
+    const ultimoUid = localStorage.getItem(this._CHAVE_ULTIMO_UID);
+    if (!ultimoUid || ultimoUid === uidAtual || totalLocalAtual === 0) {
+      localStorage.setItem(this._CHAVE_ULTIMO_UID, uidAtual);
+      return true; // ok, pode continuar
+    }
+
+    const confirmar = confirm(
+      `Este aparelho tem dados salvos localmente que foram sincronizados por outra conta do Google da última vez.\n\n` +
+      `Sincronizar agora com a conta atual pode MISTURAR dados de contas diferentes (o banco de dados local é compartilhado entre todas as abas/contas deste navegador).\n\n` +
+      `Só confirme se tiver certeza de que é isso mesmo que você quer. Cancelando, a sincronização desta vez é pulada.`
+    );
+    if (confirmar) localStorage.setItem(this._CHAVE_ULTIMO_UID, uidAtual);
+    return confirmar;
+  },
+
   /** Junta tudo (db.exportAll) e sobe pro Firestore, com pequeno atraso
    *  para agrupar várias mudanças seguidas em um único envio. */
   _agendarEnvio() {
@@ -200,6 +226,13 @@ const cloudSync = {
 
   async _puxarDaNuvem(uid) {
     try {
+      const totalLocalAntesDeChecar = this._totalItens(await db.exportAll());
+      const podeContinuar = await this._confirmarSeTrocouDeConta(uid, totalLocalAntesDeChecar);
+      if (!podeContinuar) {
+        console.warn('[cloud-sync] Sincronização pulada: usuário cancelou por causa de troca de conta detectada.');
+        return;
+      }
+
       const snap = await firestore.collection('usuarios').doc(uid).get();
       if (!snap.exists) {
         // Primeiro login deste usuário: sobe o que já existe localmente.
@@ -230,6 +263,27 @@ const cloudSync = {
         console.warn('[cloud-sync] Sincronização (baixar) pulada: os dados locais são mais recentes que os da nuvem. Enviando o local para a nuvem em vez de sobrescrevê-lo.');
         await this._enviarParaNuvem();
         return;
+      }
+
+      // Trava por VOLUME de dados — não confia só no timestamp. Se a nuvem
+      // tem bem menos itens que este aparelho (ex.: menos da metade), isso
+      // é sinal forte de dado desatualizado na nuvem (ex.: outro aparelho
+      // nunca sincronizou, ou um reload disparado pela atualização do
+      // Service Worker chegou aqui com o relógio/timestamp local
+      // momentaneamente errado). Em vez de confiar cegamente e apagar
+      // dados locais bons, pede confirmação explícita antes de continuar.
+      if (totalLocalAtual > 0 && totalNuvem < totalLocalAtual * 0.5) {
+        console.warn(`[cloud-sync] Sincronização (baixar) pausada: a nuvem tem bem menos itens (${totalNuvem}) que este aparelho (${totalLocalAtual}). Pedindo confirmação.`);
+        const confirmar = confirm(
+          `Atenção: a nuvem tem ${totalNuvem} item(ns) registrados, mas este aparelho tem ${totalLocalAtual}.\n\n` +
+          `Baixar da nuvem agora vai SUBSTITUIR os dados deste aparelho pelos da nuvem — e a nuvem parece estar desatualizada.\n\n` +
+          `Só confirme se tiver certeza de que os dados da nuvem são os corretos. Cancelando, os dados deste aparelho serão enviados para a nuvem em vez disso.`
+        );
+        if (!confirmar) {
+          console.warn('[cloud-sync] Usuário cancelou o download da nuvem — enviando os dados locais para a nuvem em vez disso.');
+          await this._enviarParaNuvem();
+          return;
+        }
       }
 
       // Backup de segurança do que já existe localmente, antes de substituir.
