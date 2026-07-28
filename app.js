@@ -535,6 +535,9 @@ async function router() {
   const view = $("#view");
   view.innerHTML = "";
 
+  // Reinicia o timer do ciclo sempre que navegar entre abas
+  _iniciarTimerCiclo();
+
   if (base === "dashboard") {
     $("#page-title").textContent = PAGE_TITLES["dashboard"];
     updateActiveNav("dashboard");

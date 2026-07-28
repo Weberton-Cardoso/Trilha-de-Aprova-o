@@ -506,7 +506,12 @@ function renderCicloPainelRoute(view, cicloId) {
   $$('[data-iniciar]', view).forEach(btn => {
     btn.addEventListener('click', () => {
       if (settings.cicloSessaoAtiva) { showToast('Finalize a sessão atual antes de iniciar outra.', 'error'); return; }
-      settings.cicloSessaoAtiva = { materiaId: Number(btn.dataset.iniciar), inicio: Date.now() };
+      settings.cicloSessaoAtiva = { materiaId: Number(btn.dataset.iniciar), inicio: Date.now(), ativo: true };
+      saveSettings();
+      // Inicia o timer global
+      if (typeof _iniciarTimerCiclo === 'function') {
+        _iniciarTimerCiclo();
+      }
       renderCicloPainelRoute(view, cicloId);
     });
   });
@@ -830,7 +835,12 @@ function _iniciarCronometroVisual() {
 function _pausarSessaoCiclo(view, cicloId) {
   const sessaoAtiva = settings.cicloSessaoAtiva;
   if (!sessaoAtiva || sessaoAtiva.pausadoEm) return;
-  settings.cicloSessaoAtiva = { ...sessaoAtiva, pausadoEm: Date.now() };
+  settings.cicloSessaoAtiva = { ...sessaoAtiva, pausadoEm: Date.now(), ativo: false };
+  saveSettings();
+  // Para o timer global
+  if (typeof _pararTimerCiclo === 'function') {
+    _pararTimerCiclo();
+  }
   renderCicloPainelRoute(view, cicloId);
 }
 
@@ -841,8 +851,14 @@ function _retomarSessaoCiclo(view, cicloId) {
   settings.cicloSessaoAtiva = {
     ...sessaoAtiva,
     pausadoEm: null,
-    tempoPausadoAcumulado: (sessaoAtiva.tempoPausadoAcumulado || 0) + pausadoAgora
+    tempoPausadoAcumulado: (sessaoAtiva.tempoPausadoAcumulado || 0) + pausadoAgora,
+    ativo: true
   };
+  saveSettings();
+  // Reinicia o timer global
+  if (typeof _iniciarTimerCiclo === 'function') {
+    _iniciarTimerCiclo();
+  }
   renderCicloPainelRoute(view, cicloId);
 }
 
@@ -862,6 +878,11 @@ async function _concluirSessaoCiclo(view, cicloId) {
     });
   }
   settings.cicloSessaoAtiva = null;
+  saveSettings();
+  // Para o timer global
+  if (typeof _pararTimerCiclo === 'function') {
+    _pararTimerCiclo();
+  }
   await reloadState();
   showToast(`Sessão registrada: ${_formatarMinutos(minutos)}`, 'success');
   renderCicloPainelRoute(view, cicloId);
