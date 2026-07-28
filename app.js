@@ -2171,6 +2171,77 @@ let _resolverIAContagem = { certas: 0, erradas: 0, brancos: 0 };
 let _resolverIABuffer = [];
 // Timer do ciclo de estudos (para exibir em todas as abas)
 let _globalCicloTimerInterval = null;
+// Tempo acumulado do ciclo atual em milissegundos
+let _cicloTempoAcumuladoMs = 0;
+// Timestamp de início da sessão atual do ciclo
+let _cicloInicioSessaoTimestamp = null;
+
+/**
+ * Calcula o tempo decorrido do ciclo em milissegundos
+ */
+function _cicloElapsedMs() {
+  const sessaoAtiva = settings.cicloSessaoAtiva;
+  if (!sessaoAtiva || !sessaoAtiva.inicio) {
+    return _cicloTempoAcumuladoMs;
+  }
+  const agora = Date.now();
+  const tempoSessaoAtual = agora - sessaoAtiva.inicio;
+  return _cicloTempoAcumuladoMs + tempoSessaoAtual;
+}
+
+/**
+ * Formata milissegundos para string HH:MM:SS
+ */
+function _formatarCronometro(ms) {
+  const totalSegundos = Math.floor(ms / 1000);
+  const horas = Math.floor(totalSegundos / 3600);
+  const minutos = Math.floor((totalSegundos % 3600) / 60);
+  const segundos = totalSegundos % 60;
+  
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(horas)}:${pad(minutos)}:${pad(segundos)}`;
+}
+
+/**
+ * Renderiza o timer global do ciclo em todas as abas relevantes
+ */
+function renderGlobalCicloTimer() {
+  const timerElements = document.querySelectorAll('.ciclo-timer-display');
+  const tempoFormatado = _formatarCronometro(_cicloElapsedMs());
+  
+  timerElements.forEach(el => {
+    el.textContent = tempoFormatado;
+  });
+}
+
+/**
+ * Inicia o timer do ciclo se houver sessão ativa
+ */
+function _iniciarTimerCiclo() {
+  if (_globalCicloTimerInterval) {
+    clearInterval(_globalCicloTimerInterval);
+  }
+  
+  const sessaoAtiva = settings.cicloSessaoAtiva;
+  if (sessaoAtiva && sessaoAtiva.inicio) {
+    _cicloInicioSessaoTimestamp = sessaoAtiva.inicio;
+    renderGlobalCicloTimer();
+    _globalCicloTimerInterval = setInterval(() => {
+      renderGlobalCicloTimer();
+    }, 1000);
+  }
+}
+
+/**
+ * Para o timer do ciclo
+ */
+function _pararTimerCiclo() {
+  if (_globalCicloTimerInterval) {
+    clearInterval(_globalCicloTimerInterval);
+    _globalCicloTimerInterval = null;
+  }
+  _cicloInicioSessaoTimestamp = null;
+}
 
 function renderResolverIA(view) {
   view.innerHTML = `
