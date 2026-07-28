@@ -74,20 +74,36 @@ initializeAppCheck(appIA, {
 // Google Cloud). É o que foi decidido usar (ver Console -> AI Logic).
 const ai = getAI(appIA, { backend: new GoogleAIBackend() });
 
-// gemini-3.5-flash: modelo atual (GA) recomendado pra este caso de uso,
-// sem exigir billing no projeto. Se um dia parar de funcionar (aviso de
-// descontinuação no Console), troque por outro nome vigente em
-// AI Logic -> Modelos.
-const model = getGenerativeModel(ai, { model: 'gemini-3.5-flash' });
+// gemini-3.1-flash-lite: modelo GA mais rápido e leve da geração atual —
+// mantém o objetivo de velocidade sem usar um modelo desativado.
+// ATENÇÃO: gemini-2.0-flash-lite foi DESLIGADO pelo Google em 1º de junho
+// de 2026 — nunca mais usar esse nome. Se este modelo também parar de
+// funcionar no futuro, confira o nome vigente em AI Logic -> Modelos.
+const model = getGenerativeModel(ai, { model: 'gemini-3.1-flash-lite' });
 
 /**
- * Chamada usada por gerarResumoIA() em app.js. Recebe o prompt já pronto
- * (montado em _montarPromptResumo) e devolve só o texto da resposta —
- * quem chamou é responsável por tentar fazer JSON.parse nesse texto.
- * Deixa o erro original subir (não faz try/catch aqui) pra gerarResumoIA
- * decidir a mensagem amigável exibida na tela.
+ * Chamada sem streaming — mantida como fallback caso o navegador não suporte
+ * streaming ou a função stream não esteja disponível.
  */
 window.chamarGeminiResumo = async function (prompt) {
   const resultado = await model.generateContent(prompt);
   return resultado.response.text();
+};
+
+/**
+ * Chamada com streaming — invoca onChunk(textoAcumulado) a cada bloco de
+ * tokens recebido, permitindo atualizar a UI enquanto a IA ainda está
+ * gerando. Retorna o texto completo ao final.
+ */
+window.chamarGeminiResumoStream = async function (prompt, onChunk) {
+  const stream = await model.generateContentStream(prompt);
+  let acumulado = '';
+  for await (const chunk of stream.stream) {
+    const parte = chunk.text();
+    if (parte) {
+      acumulado += parte;
+      try { onChunk(acumulado); } catch (_) { /* ignora erros no callback de UI */ }
+    }
+  }
+  return acumulado;
 };

@@ -1,33 +1,40 @@
 /**
  * cloud-sync.js
- * Sincronização entre dispositivos usando Firebase (Auth + Firestore).
+ * Sincronização entre dispositivos — login com Firebase Auth (Google),
+ * dados guardados no Cloudflare D1 através de um Worker (worker.js).
+ *
+ * Arquitetura híbrida: o login continua 100% no Firebase (Auth), só o
+ * ARMAZENAMENTO dos dados migrou do Firestore para o D1 — motivo principal:
+ * o D1 tem "Time Travel" (recuperação a qualquer ponto dos últimos 30 dias)
+ * de graça, enquanto o Firestore só oferece algo parecido no plano pago.
  *
  * Estratégia simples e segura para um app de uso pessoal:
  * - O IndexedDB continua sendo a fonte de dados usada pelo app no dia a dia
  *   (rápido, funciona offline).
  * - Sempre que os dados mudam localmente (evento 'ta:mudou', disparado pelo
- *   database.js), fazemos upload de um "pacote" com tudo (tentativas,
- *   editais, simulados) para um único documento no Firestore, em
- *   usuarios/{uid}. Isso reaproveita as funções exportAll()/importAll()
- *   que já existiam para backup manual.
- * - Ao logar (ou abrir o app já logado), baixamos esse documento do
- *   Firestore e substituímos o conteúdo local por ele (importAll com
+ *   database.js), fazemos PUT /dados no Worker com tudo (tentativas,
+ *   editais, simulados...). Isso reaproveita as funções
+ *   exportAll()/importAll() que já existiam para backup manual.
+ * - Ao logar (ou abrir o app já logado), buscamos esse pacote via
+ *   GET /dados e substituímos o conteúdo local por ele (importAll com
  *   substituir:true), trazendo os dados para o dispositivo atual.
  *
  * Isso é suficiente para "um usuário, vários aparelhos". Não foi pensado
  * para edição simultânea nos dois aparelhos ao mesmo tempo.
  *
  * REDE DE SEGURANÇA (adicionada após um incidente de perda de dados):
- * - Antes de QUALQUER envio para a nuvem que vá sobrescrever o documento
- *   principal, o conteúdo atual da nuvem é copiado para
- *   usuarios/{uid}/backups/{auto} — assim, mesmo que o envio seguinte
- *   esteja errado/vazio, o estado anterior fica preservado ali.
+ * - O Worker guarda uma cópia do pacote anterior em backups_historico ANTES
+ *   de qualquer PUT /dados sobrescrever o atual — não precisa fazer esse
+ *   snapshot manualmente aqui como fazíamos com o Firestore.
  * - Antes de puxar da nuvem (que substitui o banco local), o app cria um
  *   backup automático local do que já existe no aparelho.
  * - Se a nuvem estiver vazia mas o aparelho tiver dados, o app NÃO
  *   substitui o local pelo vazio (e avisa). Se o aparelho estiver vazio
  *   mas a nuvem tiver dados, o app NÃO sobrescreve a nuvem com o vazio.
- *   Isso evita que qualquer um dos dois lados apague o outro por engano.
+ * - Trava por VOLUME: se a nuvem tem bem menos itens que o aparelho local,
+ *   pede confirmação explícita antes de baixar (não confia só em timestamp).
+ * - Trava por TROCA DE CONTA: se este aparelho sincronizou por último com
+ *   outra conta do Google, pede confirmação antes de misturar dados.
  */
 
 const firebaseConfig = {
@@ -42,18 +49,24 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 
 const auth = firebase.auth();
-const firestore = firebase.firestore();
 
-// Habilita cache local do Firestore (ajuda em conexões instáveis)
-firestore.enablePersistence().catch(() => {
-  // Se falhar (ex.: várias abas abertas), não é crítico — o app continua
-  // funcionando normalmente com o IndexedDB próprio.
-});
+// URL do Worker que fala com o D1 (ver worker.js). Só muda se um dia você
+// recriar o Worker com outro nome/subdomínio.
+const WORKER_URL = 'https://trilha-sync-worker.webertoncardoso4.workers.dev';
+
+// --- Backup rotativo no Google Drive (terceira rede de segurança,
+//     independente do D1 — ver backupParaDrive() mais abaixo) ---
+const DRIVE_MAX_BACKUPS = 10;
+const DRIVE_PASTA_NOME = 'Trilha de Aprovação — Backups';
+const DRIVE_INTERVALO_MIN_MS = 60 * 60 * 1000; // no máximo 1 backup por hora
+const DRIVE_CHAVE_ULTIMO_BACKUP = 'trilha_ultimo_backup_drive';
 
 const cloudSync = {
   usuarioAtual: null,
   _pushTimer: null,
   _ignorarProximosEventos: false,
+  _driveAccessToken: null, // só existe na sessão em que o usuário logou (ver entrarComGoogle)
+  _driveFolderId: null,    // cache do id da pasta de backups, pra não buscar toda vez
 
   /** Chama isso uma vez, ao carregar o app. */
   init(onStatusChange) {
@@ -88,8 +101,20 @@ const cloudSync = {
 
   async entrarComGoogle() {
     const provider = new firebase.auth.GoogleAuthProvider();
+    // Escopo estreito: só dá acesso a arquivos que O PRÓPRIO APP criou no
+    // Drive do usuário (nunca o Drive inteiro) — usado só pelo backup
+    // rotativo no Drive (ver backupParaDrive() mais abaixo).
+    provider.addScope('https://www.googleapis.com/auth/drive.file');
     try {
-      await auth.signInWithPopup(provider);
+      const result = await auth.signInWithPopup(provider);
+      const credential = firebase.auth.GoogleAuthProvider.credentialFromResult(result);
+      // O access token do Google (diferente do ID token do Firebase) só
+      // fica disponível aqui, logo após o login — não é renovado sozinho
+      // depois. Por isso o backup no Drive só funciona enquanto essa
+      // sessão do navegador durar; expira ~1h e some de vez ao recarregar
+      // a página. É uma limitação aceitável pra um app de uso pessoal —
+      // basta logar de novo de vez em quando pra renovar.
+      this._driveAccessToken = credential?.accessToken || null;
     } catch (err) {
       console.error('Erro ao entrar com Google:', err);
       showToast('Não foi possível entrar. Tente novamente.', 'error');
@@ -126,7 +151,28 @@ const cloudSync = {
     return confirmar;
   },
 
-  /** Junta tudo (db.exportAll) e sobe pro Firestore, com pequeno atraso
+  /** Chama uma rota do Worker (worker.js), sempre anexando o ID token do
+   *  Firebase Auth como prova de login. Lança erro com a mensagem que o
+   *  Worker devolveu, se houver. */
+  async _workerFetch(path, options = {}) {
+    if (!this.usuarioAtual) throw new Error('Não há usuário logado.');
+    const idToken = await this.usuarioAtual.getIdToken();
+    const resp = await fetch(`${WORKER_URL}${path}`, {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        Authorization: `Bearer ${idToken}`,
+        ...(options.body ? { 'Content-Type': 'application/json' } : {})
+      }
+    });
+    if (!resp.ok) {
+      const corpoErro = await resp.json().catch(() => ({}));
+      throw new Error(corpoErro.erro || `O servidor respondeu ${resp.status}`);
+    }
+    return resp.json();
+  },
+
+  /** Junta tudo (db.exportAll) e sobe pro Worker/D1, com pequeno atraso
    *  para agrupar várias mudanças seguidas em um único envio. */
   _agendarEnvio() {
     clearTimeout(this._pushTimer);
@@ -149,45 +195,25 @@ const cloudSync = {
     return chaves.reduce((soma, chave) => soma + (Array.isArray(dados[chave]) ? dados[chave].length : 0), 0);
   },
 
-  /** Copia o documento principal atual da nuvem para uma subcoleção de
-   *  backups ANTES de sobrescrevê-lo. Isso garante que, mesmo que o envio
-   *  seguinte esteja errado, o estado anterior fica preservado. */
-  async _snapshotNuvemAntesDeSobrescrever(motivo) {
-    if (!this.usuarioAtual) return;
-    try {
-      const ref = firestore.collection('usuarios').doc(this.usuarioAtual.uid);
-      const snap = await ref.get();
-      if (!snap.exists) return; // nada pra guardar ainda
-      const dadosAtuais = snap.data();
-      await ref.collection('backups').add({
-        motivo: motivo || 'auto',
-        criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
-        dados: dadosAtuais
-      });
-    } catch (err) {
-      console.error('Erro ao salvar snapshot de segurança na nuvem:', err);
-    }
-  },
-
-  /** Lista os backups salvos na nuvem (mais recentes primeiro), para a
+  /** Lista os backups salvos no D1 (mais recentes primeiro), para a
    *  tela de Configurações mostrar e permitir restaurar. */
   async listarBackupsNuvem(limite = 20) {
     if (!this.usuarioAtual) return [];
-    const ref = firestore.collection('usuarios').doc(this.usuarioAtual.uid).collection('backups');
-    const query = await ref.orderBy('criadoEm', 'desc').limit(limite).get();
-    return query.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    try {
+      return await this._workerFetch(`/backups?limite=${limite}`);
+    } catch (err) {
+      console.error('Erro ao listar backups da nuvem:', err);
+      return [];
+    }
   },
 
-  /** Restaura um backup específico da nuvem (por id do documento) direto
-   *  no banco local do perfil ativo. Não mexe na nuvem — se depois disso
-   *  o app sincronizar de novo, o backup restaurado é que sobe. */
+  /** Restaura um backup específico da nuvem (por id numérico) direto no
+   *  banco local do perfil ativo. Não mexe na nuvem — se depois disso o
+   *  app sincronizar de novo, o backup restaurado é que sobe. */
   async restaurarBackupNuvem(backupId) {
     if (!this.usuarioAtual) throw new Error('Não há usuário logado.');
-    const doc = await firestore
-      .collection('usuarios').doc(this.usuarioAtual.uid)
-      .collection('backups').doc(backupId).get();
-    if (!doc.exists) throw new Error('Backup não encontrado.');
-    const { dados } = doc.data();
+    const resposta = await this._workerFetch(`/backups/${backupId}`);
+    const dados = resposta.dados;
 
     this._ignorarProximosEventos = true;
     await db.criarBackupLocalAutomatico('antes_de_restaurar_backup_nuvem').catch(() => {});
@@ -201,13 +227,15 @@ const cloudSync = {
       const dados = await db.exportAll();
       const totalLocal = this._totalItens(dados);
 
-      // Sempre guarda o estado atual da nuvem antes de sobrescrever,
-      // independente do que vier a seguir.
-      await this._snapshotNuvemAntesDeSobrescrever('antes_de_enviar');
-
       if (totalLocal === 0) {
-        const docAtual = await firestore.collection('usuarios').doc(this.usuarioAtual.uid).get();
-        const totalNuvemAtual = docAtual.exists ? this._totalItens(docAtual.data()) : 0;
+        // Confere se a nuvem já tem dados antes de decidir se é seguro
+        // enviar um pacote vazio (evita apagar a nuvem sem querer).
+        let totalNuvemAtual = 0;
+        try {
+          const respostaAtual = await this._workerFetch('/dados');
+          if (respostaAtual.existe) totalNuvemAtual = this._totalItens(respostaAtual.dados);
+        } catch (_) { /* se falhar em checar, segue com cautela abaixo mesmo assim */ }
+
         if (totalNuvemAtual > 0) {
           console.warn('[cloud-sync] Envio abortado: dados locais vazios, mas a nuvem tem dados. Preservando a nuvem.');
           showToast('Sincronização pulada: este aparelho está sem dados locais. A nuvem foi preservada.', 'warning');
@@ -215,12 +243,107 @@ const cloudSync = {
         }
       }
 
-      await firestore
-        .collection('usuarios')
-        .doc(this.usuarioAtual.uid)
-        .set(dados);
+      // O Worker já guarda um backup do estado anterior automaticamente
+      // antes de sobrescrever (ver worker.js, rota PUT /dados) — não
+      // precisa fazer esse snapshot manualmente aqui como fazíamos com o
+      // Firestore.
+      await this._workerFetch('/dados', { method: 'PUT', body: JSON.stringify(dados) });
+
+      // Dispara em paralelo, sem esperar nem deixar erro subir — tem seu
+      // próprio throttle (1x/hora) e nunca deve travar a sincronização
+      // principal caso falhe por qualquer motivo (token expirado, etc.).
+      this.backupParaDrive();
     } catch (err) {
       console.error('Erro ao enviar dados para a nuvem:', err);
+    }
+  },
+
+  // ------------------------------------------------------------
+  // BACKUP ROTATIVO NO GOOGLE DRIVE
+  // ------------------------------------------------------------
+  // Terceira rede de segurança, independente do Firestore/D1: guarda os
+  // últimos DRIVE_MAX_BACKUPS snapshots numa pasta própria do app no Drive
+  // do usuário. Útil mesmo se o problema for na conta/projeto do Firebase
+  // inteiro, não só num bug do app. Nunca lança erro pra fora — se falhar,
+  // só registra no console e segue a vida (best-effort).
+
+  async _driveFetch(path, options = {}) {
+    if (!this._driveAccessToken) throw new Error('sem token de acesso ao Drive');
+    const resp = await fetch(`https://www.googleapis.com/drive/v3/${path}`, {
+      ...options,
+      headers: { ...(options.headers || {}), Authorization: `Bearer ${this._driveAccessToken}` }
+    });
+    if (!resp.ok) throw new Error(`Drive API respondeu ${resp.status}`);
+    return resp.json();
+  },
+
+  async _obterOuCriarPastaDrive() {
+    if (this._driveFolderId) return this._driveFolderId;
+    const q = `name='${DRIVE_PASTA_NOME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+    const busca = await this._driveFetch(`files?q=${encodeURIComponent(q)}&fields=files(id,name)`);
+    if (busca.files && busca.files.length) {
+      this._driveFolderId = busca.files[0].id;
+      return this._driveFolderId;
+    }
+    const criada = await this._driveFetch('files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: DRIVE_PASTA_NOME, mimeType: 'application/vnd.google-apps.folder' })
+    });
+    this._driveFolderId = criada.id;
+    return this._driveFolderId;
+  },
+
+  async _rotacionarBackupsDrive(folderId) {
+    const q = `'${folderId}' in parents and trashed=false`;
+    const lista = await this._driveFetch(`files?q=${encodeURIComponent(q)}&fields=files(id,name,createdTime)&orderBy=createdTime desc`);
+    const arquivos = lista.files || [];
+    if (arquivos.length <= DRIVE_MAX_BACKUPS) return;
+    for (const arq of arquivos.slice(DRIVE_MAX_BACKUPS)) {
+      await this._driveFetch(`files/${arq.id}`, { method: 'DELETE' }).catch(() => {});
+    }
+  },
+
+  /** Envia um backup completo pro Drive, no máximo 1x por hora, e apaga os
+   *  mais antigos além do limite. Pode ser chamada a qualquer momento —
+   *  ela mesma decide se é cedo demais ou se falta permissão. */
+  async backupParaDrive() {
+    if (!this._driveAccessToken) {
+      console.warn('[cloud-sync] Backup no Drive pulado: sem token de acesso (faça login de novo pra renovar).');
+      return;
+    }
+
+    const agora = Date.now();
+    const ultimoBackup = Number(localStorage.getItem(DRIVE_CHAVE_ULTIMO_BACKUP) || 0);
+    if (agora - ultimoBackup < DRIVE_INTERVALO_MIN_MS) return;
+
+    try {
+      const folderId = await this._obterOuCriarPastaDrive();
+      const dados = await db.exportAll();
+      const nomeArquivo = `backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+
+      const metadata = { name: nomeArquivo, parents: [folderId] };
+      const boundary = 'trilha_' + Math.random().toString(36).slice(2);
+      const corpo =
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+        `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(dados)}\r\n--${boundary}--`;
+
+      const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this._driveAccessToken}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`
+        },
+        body: corpo
+      });
+      if (!resp.ok) throw new Error(`upload falhou (${resp.status})`);
+
+      localStorage.setItem(DRIVE_CHAVE_ULTIMO_BACKUP, String(agora));
+      console.log('[cloud-sync] Backup enviado ao Google Drive:', nomeArquivo);
+
+      await this._rotacionarBackupsDrive(folderId);
+    } catch (err) {
+      console.warn('[cloud-sync] Não foi possível fazer backup no Drive agora:', err.message);
     }
   },
 
@@ -233,14 +356,14 @@ const cloudSync = {
         return;
       }
 
-      const snap = await firestore.collection('usuarios').doc(uid).get();
-      if (!snap.exists) {
+      const resposta = await this._workerFetch('/dados');
+      if (!resposta.existe) {
         // Primeiro login deste usuário: sobe o que já existe localmente.
         await this._enviarParaNuvem();
         return;
       }
 
-      const dadosNuvem = snap.data();
+      const dadosNuvem = resposta.dados;
       const totalNuvem = this._totalItens(dadosNuvem);
       const totalLocalAtual = this._totalItens(await db.exportAll());
 
