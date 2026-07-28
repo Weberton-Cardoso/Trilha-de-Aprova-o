@@ -1684,7 +1684,10 @@ function _mdParaHtml(texto) {
   let paragrafoAtual = [];
   let listaAtual = null; // { tipo: 'ul'|'ol', itens: [] }
 
-  const negrito = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  const negrito = (s) => s
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/==(.+?)==/g, '<mark>$1</mark>')
+    .replace(/&lt;mark&gt;(.*?)&lt;\/mark&gt;/gi, '<mark>$1</mark>');
 
   function fecharParagrafo() {
     if (paragrafoAtual.length) {
@@ -1777,6 +1780,8 @@ let _resolverIASessao = { disciplina: '', assunto: '', banca: '', concurso: '' }
 let _resolverIAAtual = null;
 // Só contagem visual da sessão (não persiste — reseta ao recarregar a página).
 let _resolverIAContagem = { certas: 0, erradas: 0, brancos: 0 };
+// ID da tentativa agrupada da sessão ativa de Resolver com IA
+let _resolverIASessaoTentativaId = null;
 
 function renderResolverIA(view) {
   view.innerHTML = `
@@ -1852,10 +1857,25 @@ function renderResolverIA(view) {
   attachAutocomplete($('#ia-concurso'), valoresUnicos('concurso'));
 
   ['disciplina', 'assunto', 'banca', 'concurso'].forEach(campo => {
-    $(`#ia-${campo}`).addEventListener('change', (e) => { _resolverIASessao[campo] = e.target.value.trim(); });
+    $(`#ia-${campo}`).addEventListener('change', (e) => {
+      const val = e.target.value.trim();
+      if (campo === 'disciplina' && _resolverIASessao.disciplina && val.toLowerCase() !== _resolverIASessao.disciplina.toLowerCase()) {
+        // Ao trocar de matéria, zera a contagem e reseta o ID da tentativa agrupada
+        _resolverIAContagem = { certas: 0, erradas: 0, brancos: 0 };
+        _resolverIASessaoTentativaId = null;
+        _resolverIAAtual = null;
+      }
+      _resolverIASessao[campo] = val;
+    });
   });
 
-  $('#btn-finalizar-sessao-ia').addEventListener('click', () => { location.hash = '#/caderno'; });
+  $('#btn-finalizar-sessao-ia').addEventListener('click', () => {
+    // Ao clicar em finalizar por aqui, zera os contadores e limpa o ID da sessão
+    _resolverIAContagem = { certas: 0, erradas: 0, brancos: 0 };
+    _resolverIASessaoTentativaId = null;
+    _resolverIAAtual = null;
+    location.hash = '#/caderno';
+  });
 
   $('#btn-gerar-resumo-ia').addEventListener('click', async () => {
     const enunciado = $('#ia-enunciado').value.trim();
@@ -2038,30 +2058,56 @@ function _renderResolverIAResultado(view) {
     const concurso = $('#ia-concurso').value.trim();
     const respostaMarcada = $('#ia-resposta-marcada').value.trim();
 
-    const acertos = r.resultado === 'certa' ? 1 : 0;
-    const erros = r.resultado === 'errada' ? 1 : 0;
-    const taxa = (acertos + erros) ? (acertos / (acertos + erros)) * 100 : 0;
+    const acertosNum = r.resultado === 'certa' ? 1 : 0;
+    const errosNum = r.resultado === 'errada' ? 1 : 0;
 
-    const novaTentativaId = await db.tentativas.add({
-      disciplina, assunto, banca, concurso,
-      data: todayISO(),
-      numQuestoes: 1,
-      acertos, erros, taxa,
-      tipo: 'Questão avulsa (Resolver com IA)',
-      observacoes: '',
-      enunciado: r.enunciado,
-      resultado: r.resultado,
-      respostaMarcada: respostaMarcada || null,
-      gabaritoConfirmado
-    });
+    // Agrupamento de Tentativas: Atualiza tentativa da sessão se já existir para a mesma matéria
+    if (_resolverIASessaoTentativaId) {
+      const tentExistente = state.tentativas.find(t => t.id === _resolverIASessaoTentativaId);
+      if (tentExistente) {
+        const novosAcertos = (tentExistente.acertos || 0) + acertosNum;
+        const novosErros = (tentExistente.erros || 0) + errosNum;
+        const numQtd = (tentExistente.numQuestoes || 1) + 1;
+        const novaTaxa = (novosAcertos + novosErros) ? (novosAcertos / (novosAcertos + novosErros)) * 100 : 0;
 
+        await db.tentativas.update({
+          ...tentExistente,
+          numQuestoes: numQtd,
+          acertos: novosAcertos,
+          erros: novosErros,
+          taxa: novaTaxa
+        });
+      } else {
+        _resolverIASessaoTentativaId = null;
+      }
+    }
+
+    if (!_resolverIASessaoTentativaId) {
+      _resolverIASessaoTentativaId = await db.tentativas.add({
+        disciplina, assunto, banca, concurso,
+        data: todayISO(),
+        numQuestoes: 1,
+        acertos: acertosNum,
+        erros: errosNum,
+        taxa: (acertosNum + errosNum) ? (acertosNum / (acertosNum + errosNum)) * 100 : 0,
+        tipo: 'Sessão Resolver com IA',
+        observacoes: '',
+        enunciado: r.enunciado,
+        resultado: r.resultado,
+        respostaMarcada: respostaMarcada || null,
+        gabaritoConfirmado
+      });
+    }
+
+    // Salva o resumo no Caderno com o enunciado gravado diretamente no registro do resumo
     await db.resumos.add({
-      tentativaId: novaTentativaId,
+      tentativaId: _resolverIASessaoTentativaId,
       materia: disciplina,
       topico: assunto,
       data: todayISO(),
       textoBruto: r.bruto,
       textoCondensado: r.condensado,
+      enunciado: r.enunciado,
       enviadoAnki: false,
       ankiDeck: null
     });
@@ -2219,7 +2265,10 @@ function renderCaderno(view) {
           <div class="text-muted" style="font-size:12.5px;">${escapeHtml(materiaNode.nome)}</div>
           <h2 style="margin:2px 0 0;font-size:19px;">${escapeHtml(topicoNode ? topicoNode.nome : 'Todos os tópicos')}</h2>
         </div>
-        <input type="text" id="caderno-busca" class="search-input" style="max-width:260px;" placeholder="🔍 Buscar nos resumos..." value="${escapeHtml(_cadernoBusca)}">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <button class="btn btn-primary btn-sm" id="btn-nova-anotacao-caderno">✏️ Nova Anotação</button>
+          <input type="text" id="caderno-busca" class="search-input" style="max-width:220px;" placeholder="🔍 Buscar nos resumos..." value="${escapeHtml(_cadernoBusca)}">
+        </div>
       </div>
 
       ${!resumos.length ? `<p class="text-muted">Nenhum resumo encontrado.</p>` : Array.from(porData.entries()).map(([data, itens]) => `
@@ -2230,13 +2279,15 @@ function renderCaderno(view) {
           </div>
           ${itens.map(r => {
             const t = state.tentativas.find(x => x.id === r.tentativaId);
+            const enunciado = r.enunciado || (t && t.enunciado) || '';
             return `
-            <div class="card mb-12">
+            <div class="card mb-12" data-resumo-card="${r.id}">
               <div class="flex" style="justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
                 <div style="font-size:12px;color:var(--text-muted);">
-                  ${t ? `<b style="color:var(--text)">${escapeHtml(t.disciplina)}</b> · <span class="badge ${t.resultado === 'certa' ? 'success' : t.resultado === 'errada' ? 'danger' : 'muted'}">${t.resultado === 'certa' ? 'Certa' : t.resultado === 'errada' ? 'Errada' : 'Branco'}</span>` : 'Resumo avulso'}
+                  ${t ? `<b style="color:var(--text)">${escapeHtml(t.disciplina)}</b> · <span class="badge ${t.resultado === 'certa' ? 'success' : t.resultado === 'errada' ? 'danger' : 'muted'}">${t.resultado === 'certa' ? 'Certa' : t.resultado === 'errada' ? 'Errada' : 'Branco'}</span>` : '<span class="badge muted">Anotação Geral</span>'}
                 </div>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                  <button class="btn btn-sm btn-ghost" data-grifar-resumo="${r.id}" title="Selecione um texto no card e clique para grifar">🖍️ Grifar</button>
                   <button class="btn btn-sm" data-editar-resumo="${r.id}">✏️ Editar</button>
                   <button class="btn btn-sm btn-ghost" data-excluir-resumo="${r.id}">🗑 Excluir</button>
                   <button class="btn btn-sm ${r.enviadoAnki ? 'enviado' : ''}" data-enviar-anki="${r.id}" ${r.enviadoAnki ? 'disabled' : ''}>
@@ -2244,6 +2295,14 @@ function renderCaderno(view) {
                   </button>
                 </div>
               </div>
+              ${enunciado ? `
+                <details style="margin:6px 0 10px;" ${enunciado.length < 500 ? 'open' : ''}>
+                  <summary style="cursor:pointer;font-size:12.5px;color:var(--primary);font-weight:600;user-select:none;">📋 Enunciado da Questão</summary>
+                  <div class="caderno-enunciado-box">
+                    ${_mdParaHtml(enunciado)}
+                  </div>
+                </details>
+              ` : ''}
               <div style="line-height:1.6;font-size:13.5px;color:var(--text);margin:8px 0;">${_mdParaHtml(r.textoBruto)}</div>
               ${r.textoCondensado ? `<div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:13px;margin-top:10px;">📎 ${escapeHtml(r.textoCondensado)}</div>` : ''}
             </div>
@@ -2256,6 +2315,93 @@ function renderCaderno(view) {
       _cadernoBusca = e.target.value;
       renderMain();
     });
+
+    $('#btn-nova-anotacao-caderno')?.addEventListener('click', () => {
+      openModal(`
+        <h2>✏️ Nova Anotação no Caderno</h2>
+        <form id="form-nova-anotacao">
+          <div class="form-row">
+            <label>Matéria / Disciplina</label>
+            <input type="text" id="anotacao-materia" value="${escapeHtml(_cadernoSelecao.materia || '')}" required placeholder="Ex: Direito Constitucional">
+          </div>
+          <div class="form-row">
+            <label>Tópico / Assunto</label>
+            <input type="text" id="anotacao-topico" value="${escapeHtml(_cadernoSelecao.topico || '')}" placeholder="Ex: Direitos Fundamentais">
+          </div>
+          <div class="form-row">
+            <label>Conteúdo da Anotação (aceita **negrito** e ==grifado==)</label>
+            <textarea id="anotacao-texto" rows="7" required placeholder="Escreva suas anotações aqui..."></textarea>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" id="btn-cancelar-anotacao">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Salvar no Caderno</button>
+          </div>
+        </form>
+      `);
+      $('#btn-cancelar-anotacao').addEventListener('click', closeModal);
+      $('#form-nova-anotacao').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const materia = $('#anotacao-materia').value.trim();
+        const topico = $('#anotacao-topico').value.trim();
+        const textoBruto = $('#anotacao-texto').value.trim();
+        if (!materia || !textoBruto) return;
+
+        await db.resumos.add({
+          tentativaId: null,
+          materia,
+          topico,
+          data: todayISO(),
+          textoBruto,
+          textoCondensado: '',
+          enunciado: '',
+          enviadoAnki: false,
+          ankiDeck: null
+        });
+        closeModal();
+        await reloadState();
+        showToast('Anotação salva no Caderno!', 'success');
+        renderCaderno(view);
+      });
+    });
+
+    $$('[data-grifar-resumo]', main).forEach(btn => btn.addEventListener('click', async () => {
+      // FIX: dataset usa camelCase — data-grifar-resumo → dataset.grifarResumo
+      const id = Number(btn.dataset.grifarResumo);
+      const resumo = state.resumos.find(r => r.id === id);
+      if (!resumo) return;
+
+      const sel = window.getSelection();
+      const selectedText = sel ? sel.toString().trim() : '';
+      if (!selectedText) {
+        showToast('Selecione um trecho de texto com o mouse no card e clique em 🖍️ Grifar.', 'danger');
+        return;
+      }
+
+      // Salva como ==texto== em vez de <mark>texto</mark> — o _mdParaHtml já converte
+      // isso na exibição, e manter markdown puro no banco evita HTML solto no textoBruto.
+      const grifado = `==${selectedText}==`;
+      let alterou = false;
+
+      // Tenta encontrar o texto selecionado no bruto original (antes de converter pra HTML),
+      // pois o usuário seleciona o texto já renderizado — precisamos achar o trecho
+      // correspondente no markdown cru. Prioridade: textoBruto → textoCondensado.
+      if (resumo.textoBruto && resumo.textoBruto.includes(selectedText)) {
+        resumo.textoBruto = resumo.textoBruto.replace(selectedText, grifado);
+        alterou = true;
+      } else if (resumo.textoCondensado && resumo.textoCondensado.includes(selectedText)) {
+        resumo.textoCondensado = resumo.textoCondensado.replace(selectedText, grifado);
+        alterou = true;
+      }
+
+      if (alterou) {
+        await db.resumos.update(resumo);
+        await reloadState();
+        renderCaderno(view);
+        showToast('Trecho grifado! ✨', 'success');
+      } else {
+        showToast('Não consegui localizar o trecho selecionado no texto original. Tente selecionar um pedaço menor, sem incluir formatação.', 'danger');
+      }
+    }));
 
     $$('[data-enviar-anki]', main).forEach(btn => btn.addEventListener('click', () => {
       // Fase 2 do roadmap (AnkiConnect) ainda não está plugada — placeholder por enquanto.
@@ -2695,7 +2841,7 @@ function renderSimulados(view) {
 
 function _renderBancoQuestoesIA(view) {
   const questoesIA = state.tentativas
-    .filter(t => t.tipo === 'Questão avulsa (Resolver com IA)' && t.enunciado)
+    .filter(t => (t.tipo === 'Questão avulsa (Resolver com IA)' || t.tipo === 'Sessão Resolver com IA') && t.enunciado)
     .sort((a, b) => (b.data || '').localeCompare(a.data || '') || (b.id - a.id));
 
   const secao = document.createElement('div');
@@ -2703,11 +2849,11 @@ function _renderBancoQuestoesIA(view) {
 
   if (!questoesIA.length) {
     secao.innerHTML = `
-      <div class="section-title">Banco Pessoal de Questões (IA)</div>
+      <div class="section-title">Banco Pessoal de Questões</div>
       <div class="card">
         <p class="text-muted" style="font-size:13.5px;margin:0;">
           Nenhuma questão no banco ainda. Use "Resolver com IA" para resolver questões —
-          elas são salvas aqui automaticamente com o comentário gerado pela IA.
+          elas são salvas aqui automaticamente com a classificação e o comentário da IA.
         </p>
       </div>
     `;
@@ -2716,14 +2862,20 @@ function _renderBancoQuestoesIA(view) {
   }
 
   secao.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
       <div class="section-title" style="margin:0;">
-        Banco Pessoal de Questões (IA)
+        Banco Pessoal de Questões
         <span style="font-size:14px;font-weight:normal;color:var(--text-muted);margin-left:6px;">${questoesIA.length} questão${questoesIA.length !== 1 ? 'ões' : ''}</span>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <select id="banco-ia-agrupamento" class="search-input" style="max-width:180px;font-size:12.5px;">
+          <option value="materia">📁 Por Matéria</option>
+          <option value="topico">📌 Por Tópico</option>
+          <option value="banca">🏛️ Por Banca</option>
+          <option value="nenhum">📜 Lista corrida</option>
+        </select>
         <button class="btn btn-primary btn-sm" id="btn-gerar-simulado-ia">🎯 Gerar Simulado</button>
-        <input type="text" id="banco-ia-busca" class="search-input" style="max-width:200px;" placeholder="🔍 Buscar…">
+        <input type="text" id="banco-ia-busca" class="search-input" style="max-width:180px;" placeholder="🔍 Buscar…">
       </div>
     </div>
     <div id="banco-ia-lista"></div>
@@ -2732,6 +2884,41 @@ function _renderBancoQuestoesIA(view) {
   view.appendChild(secao);
 
   let _bancoBusca = '';
+  let _bancoAgrupamento = 'materia';
+
+  function renderCardQuestao(t) {
+    const resumo = state.resumos.find(r => r.tentativaId === t.id);
+    const resultadoClass = t.resultado === 'certa' ? 'success' : t.resultado === 'errada' ? 'danger' : 'muted';
+    const resultadoLabel = t.resultado === 'certa' ? 'Certa' : t.resultado === 'errada' ? 'Errada' : 'Branco';
+    return `
+      <div class="card mb-12" style="background:var(--surface-2);">
+        <div class="flex" style="justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+          <div>
+            <b style="font-size:14px;">${escapeHtml(t.disciplina || '(Sem disciplina)')}</b>
+            ${t.assunto ? `<span style="color:var(--text-muted);font-size:13px;"> · ${escapeHtml(t.assunto)}</span>` : ''}
+            ${t.banca ? `<span style="color:var(--text-muted);font-size:12px;"> · ${escapeHtml(t.banca)}</span>` : ''}
+            ${t.concurso ? `<span style="color:var(--text-muted);font-size:12px;"> · ${escapeHtml(t.concurso)}</span>` : ''}
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <span class="badge ${resultadoClass}">${resultadoLabel}</span>
+            <span style="font-size:12px;color:var(--text-muted);">${toBRDate(t.data)}</span>
+            ${t.gabaritoConfirmado ? `<span style="font-size:12px;background:var(--surface);padding:2px 8px;border-radius:4px;">Gabarito: <b>${escapeHtml(t.gabaritoConfirmado)}</b></span>` : ''}
+          </div>
+        </div>
+        <details open>
+          <summary style="cursor:pointer;font-size:13px;color:var(--primary);user-select:none;margin-bottom:4px;">📋 Enunciado completo</summary>
+          <div style="white-space:pre-wrap;font-size:13px;color:var(--text);line-height:1.6;margin:8px 0;padding:10px;background:var(--surface);border-radius:6px;">${escapeHtml(t.enunciado || '')}</div>
+        </details>
+        ${resumo ? `
+          <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">💡 Comentário da IA</div>
+            <div style="line-height:1.6;font-size:13px;color:var(--text);">${_mdParaHtml(resumo.textoBruto)}</div>
+            ${resumo.textoCondensado ? `<div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:12px;margin-top:8px;">📎 ${escapeHtml(resumo.textoCondensado)}</div>` : ''}
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
 
   function renderListaBanco() {
     const termo = _bancoBusca.trim().toLowerCase();
@@ -2751,42 +2938,53 @@ function _renderBancoQuestoesIA(view) {
       return;
     }
 
-    listaEl.innerHTML = lista.map(t => {
-      const resumo = state.resumos.find(r => r.tentativaId === t.id);
-      const resultadoClass = t.resultado === 'certa' ? 'success' : t.resultado === 'errada' ? 'danger' : 'muted';
-      const resultadoLabel = t.resultado === 'certa' ? 'Certa' : t.resultado === 'errada' ? 'Errada' : 'Branco';
-      return `
-        <div class="card mb-12">
-          <div class="flex" style="justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
-            <div>
-              <b style="font-size:14px;">${escapeHtml(t.disciplina || '(Sem disciplina)')}</b>
-              ${t.assunto ? `<span style="color:var(--text-muted);font-size:13px;"> · ${escapeHtml(t.assunto)}</span>` : ''}
-              ${t.banca ? `<span style="color:var(--text-muted);font-size:12px;"> · ${escapeHtml(t.banca)}</span>` : ''}
-              ${t.concurso ? `<span style="color:var(--text-muted);font-size:12px;"> · ${escapeHtml(t.concurso)}</span>` : ''}
-            </div>
-            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-              <span class="badge ${resultadoClass}">${resultadoLabel}</span>
-              <span style="font-size:12px;color:var(--text-muted);">${toBRDate(t.data)}</span>
-              ${t.gabaritoConfirmado ? `<span style="font-size:12px;background:var(--surface-2);padding:2px 8px;border-radius:4px;">Gabarito: <b>${escapeHtml(t.gabaritoConfirmado)}</b></span>` : ''}
-            </div>
-          </div>
-          <details>
-            <summary style="cursor:pointer;font-size:13px;color:var(--primary);user-select:none;margin-bottom:4px;">Ver enunciado completo</summary>
-            <div style="white-space:pre-wrap;font-size:13px;color:var(--text);line-height:1.6;margin:8px 0;padding:10px;background:var(--surface-2);border-radius:6px;">${escapeHtml(t.enunciado || '')}</div>
-          </details>
-          ${resumo ? `
-            <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
-              <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">💡 Comentário da IA</div>
-              <div style="line-height:1.6;font-size:13px;color:var(--text);">${_mdParaHtml(resumo.textoBruto)}</div>
-              ${resumo.textoCondensado ? `<div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:12px;margin-top:8px;">📎 ${escapeHtml(resumo.textoCondensado)}</div>` : ''}
-            </div>
-          ` : ''}
+    if (_bancoAgrupamento === 'nenhum') {
+      listaEl.innerHTML = lista.map(t => renderCardQuestao(t)).join('');
+      return;
+    }
+
+    // Agrupa por Matéria, Tópico ou Banca
+    const grupos = new Map();
+    lista.forEach(t => {
+      let chave = '(Sem classificação)';
+      if (_bancoAgrupamento === 'materia') chave = t.disciplina || '(Sem matéria)';
+      else if (_bancoAgrupamento === 'topico') chave = t.assunto || '(Sem tópico)';
+      else if (_bancoAgrupamento === 'banca') chave = t.banca || '(Sem banca)';
+
+      if (!grupos.has(chave)) grupos.set(chave, []);
+      grupos.get(chave).push(t);
+    });
+
+    const gruposOrdenados = Array.from(grupos.entries()).sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'));
+
+    listaEl.innerHTML = gruposOrdenados.map(([nomeGrupo, itens]) => `
+      <div class="banco-grupo">
+        <div class="banco-grupo-head" data-toggle-grupo="${escapeHtml(nomeGrupo)}">
+          <span>📂 ${escapeHtml(nomeGrupo)}</span>
+          <span class="badge muted">${itens.length} questão${itens.length !== 1 ? 'ões' : ''}</span>
         </div>
-      `;
-    }).join('');
+        <div class="banco-grupo-body">
+          ${itens.map(t => renderCardQuestao(t)).join('')}
+        </div>
+      </div>
+    `).join('');
+
+    $$('.banco-grupo-head', listaEl).forEach(head => {
+      head.addEventListener('click', () => {
+        const body = head.nextElementSibling;
+        if (body) {
+          body.style.display = body.style.display === 'none' ? 'block' : 'none';
+        }
+      });
+    });
   }
 
   renderListaBanco();
+
+  $('#banco-ia-agrupamento')?.addEventListener('change', (e) => {
+    _bancoAgrupamento = e.target.value;
+    renderListaBanco();
+  });
 
   $('#banco-ia-busca')?.addEventListener('input', (e) => {
     _bancoBusca = e.target.value;

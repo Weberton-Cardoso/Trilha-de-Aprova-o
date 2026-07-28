@@ -15,17 +15,13 @@
   --text-muted: #8A94A6;
   --text-faint: #5C6779;
 
-  /* Nome da variável mantido (--gold) por compatibilidade com outros
-     arquivos (ciclo.js, editais.js etc.) que já usam var(--gold) — mas o
-     valor agora é roxo/índigo, não dourado (mudança de identidade visual). */
-  --gold: #8B7CF6;
-  --gold-soft: rgba(139,124,246,.16);
+  --gold: #E8B14D;
+  --gold-soft: rgba(232,177,77,.14);
   --success: #34D399;
   --success-soft: rgba(52,211,153,.14);
   --danger: #F87171;
   --danger-soft: rgba(248,113,113,.14);
   --info: #60A5FA;
-  --info-soft: rgba(96,165,250,.14);
 
   --font-display: 'Sora', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
@@ -98,10 +94,7 @@ button{ font-family:inherit; cursor:pointer; }
 .sidebar.collapsed .nav-group-toggle span,
 .sidebar.collapsed .chev,
 .sidebar.collapsed .nav-submenu,
-.sidebar.collapsed .streak-mini span,
-.sidebar.collapsed .conta-btn span{ display:none; }
-.sidebar.collapsed .streak-mini{ justify-content:center; padding:10px; }
-.sidebar.collapsed .conta-btn{ padding:10px; }
+.sidebar.collapsed .streak-mini span{ display:none; }
 .sidebar.collapsed .nav-item,
 .sidebar.collapsed .nav-group-toggle{ justify-content:center; }
 
@@ -114,10 +107,9 @@ button{ font-family:inherit; cursor:pointer; }
 }
 .brand{ display:flex; align-items:center; gap:10px; overflow:hidden; }
 .brand-mark{
-  width:32px; height:32px; flex-shrink:0; border-radius:10px;
-  background:radial-gradient(circle at 35% 30%, var(--gold), #2E2560 90%);
+  width:30px; height:30px; flex-shrink:0; border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, var(--gold), #8a6420 90%);
   box-shadow:0 0 0 3px var(--gold-soft);
-  display:flex; align-items:center; justify-content:center;
 }
 .brand-text{ display:flex; flex-direction:column; line-height:1.15; white-space:nowrap; }
 .brand-text strong{ font-family:var(--font-display); font-size:15px; font-weight:700; }
@@ -232,8 +224,8 @@ button{ font-family:inherit; cursor:pointer; }
 }
 .btn:hover{ background:var(--surface-hover); }
 .btn:active{ transform:scale(.97); }
-.btn-primary{ background:var(--gold); border-color:var(--gold); color:#F5F3FF; }
-.btn-primary:hover{ background:#A79AF9; }
+.btn-primary{ background:var(--gold); border-color:var(--gold); color:#1a1305; }
+.btn-primary:hover{ background:#f0bd63; }
 .btn-danger{ background:transparent; border-color:var(--danger); color:var(--danger); }
 .btn-danger:hover{ background:var(--danger-soft); }
 .btn-sm{ padding:8px 12px; font-size:13px; }
@@ -256,35 +248,21 @@ button{ font-family:inherit; cursor:pointer; }
 }
 
 .stat-grid{
-  display:grid; grid-template-columns:repeat(auto-fit, minmax(200px,1fr));
+  display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr));
   gap:14px; margin-bottom:20px;
 }
 .stat-card{
   background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
-  padding:16px; animation:fadeUp .35s var(--ease);
-  display:flex; gap:12px; align-items:flex-start;
+  padding:18px; animation:fadeUp .35s var(--ease);
 }
-.stat-card-icon{
-  width:38px; height:38px; border-radius:10px; flex-shrink:0;
-  display:flex; align-items:center; justify-content:center;
-  background:var(--surface-2); color:var(--text-muted);
-}
-.stat-card.gold .stat-card-icon{ background:var(--gold-soft); color:var(--gold); }
-.stat-card.success .stat-card-icon{ background:var(--success-soft); color:var(--success); }
-.stat-card.danger .stat-card-icon{ background:var(--danger-soft); color:var(--danger); }
-.stat-card.info .stat-card-icon{ background:var(--info-soft); color:var(--info); }
-.stat-card-body{ flex:1; min-width:0; }
 .stat-card .label{ font-size:12.5px; color:var(--text-muted); font-weight:500; }
 .stat-card .value{
-  font-family:var(--font-mono); font-size:24px; font-weight:600; margin-top:4px;
+  font-family:var(--font-mono); font-size:26px; font-weight:600; margin-top:6px;
 }
 .stat-card.gold .value{ color:var(--gold); }
 .stat-card.success .value{ color:var(--success); }
 .stat-card.danger .value{ color:var(--danger); }
 .stat-card.info .value{ color:var(--info); }
-.stat-card .delta{ font-size:11.5px; color:var(--text-muted); margin-top:4px; }
-.stat-card .delta.positive{ color:var(--success); }
-.stat-card .delta.negative{ color:var(--danger); }
 
 .grid-2{ display:grid; grid-template-columns:1.3fr 1fr; gap:16px; }
 .grid-3{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
@@ -728,22 +706,11 @@ tr.row-motivo td{ padding-top:0; padding-bottom:8px; border-top:none; }
   .card + .card, .card.mt-12, .card.mt-16{ margin-top:10px !important; }
 
   .stat-grid{ grid-template-columns:repeat(2, 1fr); gap:8px; margin-bottom:14px; }
-  .stat-card{ padding:12px; gap:8px; }
-  .stat-card-icon{ width:30px; height:30px; }
+  .stat-card{ padding:12px; }
   .stat-card .label{ font-size:11.5px; }
   .stat-card .value{ font-size:20px; margin-top:4px; }
 
   .grid-2, .grid-3{ gap:10px; }
-
-  /* form-grid-2 (Disciplina/Tópico, Banca/Concurso, Gabarito/Resposta em
-     "Resolver com IA", etc.) não tinha versão pra celular — ficava
-     forçando 2 colunas apertadas e cortando labels mais longos. */
-  .form-grid-2{ grid-template-columns:1fr; gap:0; }
-
-  /* A caixa de colar o enunciado da questão é enorme (rows="14") — bom no
-     PC, mas no celular vira uma área vazia gigante antes de qualquer botão
-     aparecer. Reduz a altura mantendo o texto que já foi digitado visível. */
-  #ia-enunciado{ min-height:140px; height:140px; }
 
   .btn{ padding:9px 13px; font-size:13.5px; }
   .btn-sm{ padding:7px 10px; font-size:12.5px; }
@@ -846,3 +813,17 @@ tr.row-motivo td{ padding-top:0; padding-bottom:8px; border-top:none; }
 .caderno-main li{ margin-bottom:6px; line-height:1.5; }
 .texto-resumo-bruto li:last-child,
 .caderno-main li:last-child{ margin-bottom:0; }
+
+/* ============================================================
+   GRIFE DE TEXTO (==texto== → <mark>)
+   ============================================================ */
+mark{
+  background: rgba(255, 214, 0, 0.35);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+[data-theme="light"] mark,
+:root:not([data-theme]) mark{
+  background: rgba(255, 214, 0, 0.55);
+}
