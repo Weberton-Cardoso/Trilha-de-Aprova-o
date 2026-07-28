@@ -2167,6 +2167,10 @@ let _resolverIASessao = {
 let _resolverIAAtual = null;
 // Só contagem visual da sessão (não persiste — reseta ao recarregar a página).
 let _resolverIAContagem = { certas: 0, erradas: 0, brancos: 0 };
+// Buffer para agrupar questões da mesma matéria/tópico antes de salvar no banco
+let _resolverIABuffer = [];
+// Timer do ciclo de estudos (para exibir em todas as abas)
+let _globalCicloTimerInterval = null;
 
 function renderResolverIA(view) {
   view.innerHTML = `
@@ -2249,7 +2253,80 @@ function renderResolverIA(view) {
     });
   });
 
-  $("#btn-finalizar-sessao-ia").addEventListener("click", () => {
+  $("#btn-finalizar-sessao-ia").addEventListener("click", async () => {
+    // Salva todas as questões do buffer agrupadas por matéria/tópico
+    if (_resolverIABuffer.length === 0) {
+      location.hash = "#/caderno";
+      return;
+    }
+
+    // Agrupa questões por disciplina + assunto para criar registros consolidados
+    const grupos = new Map();
+    for (const q of _resolverIABuffer) {
+      const chave = `${q.disciplina}|${q.assunto}`;
+      if (!grupos.has(chave)) {
+        grupos.set(chave, {
+          disciplina: q.disciplina,
+          assunto: q.assunto,
+          banca: q.banca,
+          concurso: q.concurso,
+          data: q.data,
+          questoes: [],
+        });
+      }
+      grupos.get(chave).questoes.push(q);
+    }
+
+    // Salva cada grupo como um registro único no banco
+    for (const [chave, grupo] of grupos) {
+      const totalQuestoes = grupo.questoes.length;
+      const totalAcertos = grupo.questoes.reduce((s, q) => s + q.acertos, 0);
+      const totalErros = grupo.questoes.reduce((s, q) => s + q.erros, 0);
+      const taxa = totalAcertos + totalErros ? (totalAcertos / (totalAcertos + totalErros)) * 100 : 0;
+
+      const tentativaId = await db.tentativas.add({
+        disciplina: grupo.disciplina,
+        assunto: grupo.assunto,
+        banca: grupo.banca,
+        concurso: grupo.concurso,
+        data: grupo.data,
+        numQuestoes: totalQuestoes,
+        acertos: totalAcertos,
+        erros: totalErros,
+        taxa,
+        tipo: "Questão avulsa (Resolver com IA)",
+        observacoes: "",
+        // Armazena apenas o primeiro enunciado como referência (ou poderia concatenar)
+        enunciado: grupo.questoes[0].enunciado,
+        resultado: grupo.questoes[0].resultado,
+        respostaMarcada: grupo.questoes[0].respostaMarcada,
+        gabaritoConfirmado: grupo.questoes[0].gabaritoConfirmado,
+      });
+
+      // Salva resumos de todas as questões do grupo
+      for (const q of grupo.questoes) {
+        await db.resumos.add({
+          tentativaId,
+          materia: q.disciplina,
+          topico: q.assunto,
+          data: q.data,
+          textoBruto: q.bruto,
+          textoCondensado: q.condensado,
+          enviadoAnki: false,
+          ankiDeck: null,
+        });
+      }
+    }
+
+    await reloadState();
+    updateStreakMini();
+    showToast(`${_resolverIABuffer.length} questão(ões) registradas e resumos salvos no Caderno.`, "success");
+
+    // Zera a contagem e a sessão atual ao finalizar
+    _resolverIAContagem = { certas: 0, erradas: 0, brancos: 0 };
+    _resolverIASessao = { disciplina: "", assunto: "", banca: "", concurso: "" };
+    _resolverIAAtual = null;
+    _resolverIABuffer = [];
     location.hash = "#/caderno";
   });
 
@@ -2466,37 +2543,21 @@ function _renderResolverIAResultado(view) {
     const concurso = $("#ia-concurso").value.trim();
     const respostaMarcada = $("#ia-resposta-marcada").value.trim();
 
-    const acertos = r.resultado === "certa" ? 1 : 0;
-    const erros = r.resultado === "errada" ? 1 : 0;
-    const taxa = acertos + erros ? (acertos / (acertos + erros)) * 100 : 0;
-
-    const novaTentativaId = await db.tentativas.add({
+    // Adiciona ao buffer para agrupamento posterior
+    _resolverIABuffer.push({
       disciplina,
       assunto,
       banca,
       concurso,
       data: todayISO(),
-      numQuestoes: 1,
-      acertos,
-      erros,
-      taxa,
-      tipo: "Questão avulsa (Resolver com IA)",
-      observacoes: "",
+      acertos: r.resultado === "certa" ? 1 : 0,
+      erros: r.resultado === "errada" ? 1 : 0,
       enunciado: r.enunciado,
       resultado: r.resultado,
       respostaMarcada: respostaMarcada || null,
       gabaritoConfirmado,
-    });
-
-    await db.resumos.add({
-      tentativaId: novaTentativaId,
-      materia: disciplina,
-      topico: assunto,
-      data: todayISO(),
-      textoBruto: r.bruto,
-      textoCondensado: r.condensado,
-      enviadoAnki: false,
-      ankiDeck: null,
+      bruto: r.bruto,
+      condensado: r.condensado,
     });
 
     _resolverIAContagem[
@@ -2509,9 +2570,8 @@ function _renderResolverIAResultado(view) {
     _resolverIASessao = { disciplina, assunto, banca, concurso };
     _resolverIAAtual = null;
 
-    await reloadState();
     updateStreakMini();
-    showToast("Questão registrada e resumo salvo no Caderno.", "success");
+    showToast("Questão adicionada à sessão. Continue resolvendo ou finalize para salvar.", "success");
     renderResolverIA(view);
     $("#ia-enunciado")?.focus();
   });
@@ -2529,6 +2589,7 @@ function _renderResolverIAResultado(view) {
 
 let _cadernoSelecao = { materia: null, topico: null };
 let _cadernoBusca = "";
+let _cadernoAnotacoes = new Map(); // mapa tentativaId -> anotação do usuário
 
 /** Agrupa state.resumos em { materia -> { topico -> [resumos] } }, com
  *  contagem por nó, pronta pra desenhar a árvore da sidebar do Caderno. */
@@ -2708,6 +2769,7 @@ function renderCaderno(view) {
           ${itens
             .map((r) => {
               const t = state.tentativas.find((x) => x.id === r.tentativaId);
+              const anotacaoSalva = _cadernoAnotacoes.get(r.tentativaId) || "";
               return `
             <div class="card mb-12">
               <div class="flex" style="justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
@@ -2722,8 +2784,18 @@ function renderCaderno(view) {
                   </button>
                 </div>
               </div>
+              ${t?.enunciado ? `
+              <div style="margin-bottom:12px;padding:12px;background:var(--surface-2);border-radius:8px;border-left:3px solid var(--info);">
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;font-weight:700;">📝 Enunciado</div>
+                <div style="white-space:pre-wrap;font-size:13px;line-height:1.6;color:var(--text);">${escapeHtml(t.enunciado)}</div>
+              </div>
+              ` : ""}
               <div style="line-height:1.6;font-size:13.5px;color:var(--text);margin:8px 0;">${_mdParaHtml(r.textoBruto)}</div>
               ${r.textoCondensado ? `<div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:13px;margin-top:10px;">📎 ${escapeHtml(r.textoCondensado)}</div>` : ""}
+              <div style="margin-top:14px;">
+                <label style="font-size:12px;color:var(--text-muted);font-weight:600;display:block;margin-bottom:6px;">📌 Suas anotações</label>
+                <textarea class="caderno-anotacao" data-tentativa-id="${r.tentativaId}" rows="3" placeholder="Digite suas anotações pessoais sobre esta questão...">${escapeHtml(anotacaoSalva)}</textarea>
+              </div>
             </div>
           `;
             })
@@ -2735,9 +2807,23 @@ function renderCaderno(view) {
       }
     `;
 
+    // Listener para busca
     $("#caderno-busca").addEventListener("input", (e) => {
       _cadernoBusca = e.target.value;
       renderMain();
+    });
+
+    // Listener para anotações (salva em tempo real no Map em memória)
+    main.addEventListener("input", (e) => {
+      if (e.target.classList.contains("caderno-anotacao")) {
+        const tentativaId = Number(e.target.dataset.tentativaId);
+        const valor = e.target.value;
+        if (valor.trim()) {
+          _cadernoAnotacoes.set(tentativaId, valor);
+        } else {
+          _cadernoAnotacoes.delete(tentativaId);
+        }
+      }
     });
 
     $$("[data-enviar-anki]", main).forEach((btn) =>
@@ -3210,15 +3296,33 @@ function renderSimulados(view) {
   } else {
     wrap.innerHTML = `
       <table>
-        <thead><tr><th>Data</th><th>Nome</th><th>Questões</th><th>Acertos</th><th>Erros</th><th>Aproveitamento</th><th>Tempo</th><th></th></tr></thead>
+        <thead><tr><th>Data</th><th>Nome</th><th>Matéria</th><th>Tópico</th><th>Banca</th><th>Questões</th><th>Acertos</th><th>Erros</th><th>Aproveitamento</th><th>Tempo</th><th></th></tr></thead>
         <tbody>
           ${lista
             .map((s) => {
               const pct = s.numQuestoes ? (s.acertos / s.numQuestoes) * 100 : 0;
+              // Tenta extrair matéria, tópico e banca das questões associadas a este simulado
+              // Se for um simulado antigo sem essa info, mostra "—"
+              const questoesRelacionadas = state.tentativas.filter(t => t.simuladoId === s.id);
+              const materiasUnicas = [...new Set(questoesRelacionadas.map(q => q.disciplina).filter(Boolean))];
+              const topicosUnicos = [...new Set(questoesRelacionadas.map(q => q.assunto).filter(Boolean))];
+              const bancasUnicas = [...new Set(questoesRelacionadas.map(q => q.banca).filter(Boolean))];
+              const materiaDisplay = materiasUnicas.length > 0 
+                ? (materiasUnicas.length > 1 ? `<span style="font-size:11px;color:var(--text-muted);">${materiasUnicas.length} matérias</span>` : escapeHtml(materiasUnicas[0]))
+                : "—";
+              const topicoDisplay = topicosUnicos.length > 0
+                ? (topicosUnicos.length > 1 ? `<span style="font-size:11px;color:var(--text-muted);">${topicosUnicos.length} tópicos</span>` : escapeHtml(topicosUnicos[0]))
+                : "—";
+              const bancaDisplay = bancasUnicas.length > 0
+                ? (bancasUnicas.length > 1 ? `<span style="font-size:11px;color:var(--text-muted);">${bancasUnicas.length} bancas</span>` : escapeHtml(bancasUnicas[0]))
+                : "—";
               return `
             <tr>
               <td class="num">${toBRDate(s.data)}</td>
               <td>${escapeHtml(s.nome)}</td>
+              <td style="font-size:13px;">${materiaDisplay}</td>
+              <td style="font-size:13px;">${topicoDisplay}</td>
+              <td style="font-size:13px;">${bancaDisplay}</td>
               <td class="num">${s.numQuestoes}</td>
               <td class="num" style="color:var(--success)">${s.acertos}</td>
               <td class="num" style="color:var(--danger)">${s.erros}</td>
@@ -3285,6 +3389,17 @@ function _renderBancoQuestoesIA(view) {
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
         <button class="btn btn-primary btn-sm" id="btn-gerar-simulado-ia">🎯 Gerar Simulado</button>
+        <select id="banco-ia-filtro-materia" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:var(--radius-sm);font-size:13px;">
+          <option value="">Todas as matérias</option>
+          ${[...new Set(questoesIA.map(q => q.disciplina).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR")).map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("")}
+        </select>
+        <select id="banco-ia-filtro-topico" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:var(--radius-sm);font-size:13px;">
+          <option value="">Todos os tópicos</option>
+        </select>
+        <select id="banco-ia-filtro-banca" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:var(--radius-sm);font-size:13px;">
+          <option value="">Todas as bancas</option>
+          ${[...new Set(questoesIA.map(q => q.banca).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR")).map(b => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join("")}
+        </select>
         <input type="text" id="banco-ia-busca" class="search-input" style="max-width:200px;" placeholder="🔍 Buscar…">
       </div>
     </div>
@@ -3294,10 +3409,25 @@ function _renderBancoQuestoesIA(view) {
   view.appendChild(secao);
 
   let _bancoBusca = "";
+  let _bancoFiltroMateria = "";
+  let _bancoFiltroTopico = "";
+  let _bancoFiltroBanca = "";
 
   function renderListaBanco() {
     const termo = _bancoBusca.trim().toLowerCase();
     let lista = questoesIA;
+    
+    // Aplica filtros de matéria, tópico e banca
+    if (_bancoFiltroMateria) {
+      lista = lista.filter(t => t.disciplina === _bancoFiltroMateria);
+    }
+    if (_bancoFiltroTopico) {
+      lista = lista.filter(t => t.assunto === _bancoFiltroTopico);
+    }
+    if (_bancoFiltroBanca) {
+      lista = lista.filter(t => t.banca === _bancoFiltroBanca);
+    }
+    
     if (termo) {
       lista = lista.filter(
         (t) =>
@@ -3310,7 +3440,7 @@ function _renderBancoQuestoesIA(view) {
 
     const listaEl = $("#banco-ia-lista");
     if (!lista.length) {
-      listaEl.innerHTML = `<p class="text-muted" style="padding:8px 0;">Nenhuma questão encontrada para essa busca.</p>`;
+      listaEl.innerHTML = `<p class="text-muted" style="padding:8px 0;">Nenhuma questão encontrada para esses filtros.</p>`;
       return;
     }
 
@@ -3365,7 +3495,40 @@ function _renderBancoQuestoesIA(view) {
       .join("");
   }
 
+  // Atualiza tópicos quando matéria é selecionada
+  function atualizarFiltroTopicos() {
+    const topicoSelect = $("#banco-ia-filtro-topico");
+    if (!topicoSelect) return;
+    
+    const topicos = questoesIA
+      .filter(t => !_bancoFiltroMateria || t.disciplina === _bancoFiltroMateria)
+      .map(t => t.assunto)
+      .filter(Boolean);
+    const topicosUnicos = [...new Set(topicos)].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+    
+    topicoSelect.innerHTML = `
+      <option value="">Todos os tópicos</option>
+      ${topicosUnicos.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}
+    `;
+  }
+
   renderListaBanco();
+
+  $("#banco-ia-filtro-materia")?.addEventListener("change", (e) => {
+    _bancoFiltroMateria = e.target.value;
+    atualizarFiltroTopicos();
+    renderListaBanco();
+  });
+
+  $("#banco-ia-filtro-topico")?.addEventListener("change", (e) => {
+    _bancoFiltroTopico = e.target.value;
+    renderListaBanco();
+  });
+
+  $("#banco-ia-filtro-banca")?.addEventListener("change", (e) => {
+    _bancoFiltroBanca = e.target.value;
+    renderListaBanco();
+  });
 
   $("#banco-ia-busca")?.addEventListener("input", (e) => {
     _bancoBusca = e.target.value;

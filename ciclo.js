@@ -150,6 +150,45 @@ function _cicloElapsedMs(sessaoAtiva, agora = Date.now()) {
   return Math.max(0, agora - sessaoAtiva.inicio - pausadoTotal);
 }
 
+/** Formata segundos para exibição no cronômetro (MM:SS ou HH:MM:SS) */
+function formatarCronometroParaExibicao(segundosTotais) {
+  const h = Math.floor(segundosTotais / 3600);
+  const m = Math.floor((segundosTotais % 3600) / 60);
+  const s = Math.floor(segundosTotais % 60);
+  const pad = (n) => String(n).padStart(2, '0');
+  return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+}
+
+/** Renderiza um banner com o cronômetro do ciclo ativo para usar em outras telas */
+function renderRelogioCicloAtivo() {
+  const sessaoAtiva = settings.cicloSessaoAtiva;
+  if (!sessaoAtiva) return '';
+  
+  const materia = state.cicloMaterias.find(m => m.id === sessaoAtiva.materiaId);
+  const ciclo = materia ? state.ciclos.find(c => c.id === materia.cicloId) : null;
+  if (!materia || !ciclo) return '';
+  
+  const pausado = !!sessaoAtiva.pausadoEm;
+  const seg = Math.floor(_cicloElapsedMs(sessaoAtiva) / 1000);
+  const tempoFormatado = formatarCronometroParaExibicao(seg);
+  
+  return `
+    <div class="card mb-12" style="background:var(--surface-2); border-left:4px solid ${pausado ? '#F59E0B' : '#10B981'};">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:200px;">
+          <div style="font-size:12px; color:var(--text-muted);">🕐 Ciclo de Estudos em andamento</div>
+          <div style="font-weight:600; font-size:14px;">${escapeHtml(ciclo.nome)} · ${escapeHtml(materia.nome)}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-family:monospace; font-size:22px; font-weight:700; color:${pausado ? '#F59E0B' : '#10B981'};">${tempoFormatado}</div>
+          <div style="font-size:11px; color:var(--text-muted);">${pausado ? '⏸ Pausado' : '▶ Em progresso'}</div>
+        </div>
+        <a href="#/ciclo/${ciclo.id}" class="btn btn-sm btn-primary">Ver ciclo</a>
+      </div>
+    </div>
+  `;
+}
+
 /* ---- Lista de todos os ciclos (#/ciclo) ---- */
 function renderCiclosLista(view) {
   clearInterval(_cicloTimerInterval);
