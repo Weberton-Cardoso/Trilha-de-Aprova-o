@@ -104,6 +104,22 @@ const settings = {
     if (v) localStorage.setItem("ta_ciclo_sessao_ativa", JSON.stringify(v));
     else localStorage.removeItem("ta_ciclo_sessao_ativa");
   },
+  // Tempo acumulado do ciclo em milissegundos
+  get cicloTempoAcumulado() {
+    const val = localStorage.getItem("ta_ciclo_tempo_acumulado");
+    return val ? parseInt(val, 10) : 0;
+  },
+  set cicloTempoAcumulado(v) {
+    localStorage.setItem("ta_ciclo_tempo_acumulado", String(v));
+  },
+  // Histórico de ciclos finalizados
+  get cicloHistorico() {
+    const raw = localStorage.getItem("ta_ciclo_historico");
+    return raw ? JSON.parse(raw) : [];
+  },
+  set cicloHistorico(v) {
+    localStorage.setItem("ta_ciclo_historico", JSON.stringify(v));
+  },
 };
 
 function applyTheme() {
@@ -2171,10 +2187,6 @@ let _resolverIAContagem = { certas: 0, erradas: 0, brancos: 0 };
 let _resolverIABuffer = [];
 // Timer do ciclo de estudos (para exibir em todas as abas)
 let _globalCicloTimerInterval = null;
-// Tempo acumulado do ciclo atual em milissegundos
-let _cicloTempoAcumuladoMs = 0;
-// Timestamp de início da sessão atual do ciclo
-let _cicloInicioSessaoTimestamp = null;
 
 /**
  * Calcula o tempo decorrido do ciclo em milissegundos
@@ -2182,11 +2194,11 @@ let _cicloInicioSessaoTimestamp = null;
 function _cicloElapsedMs() {
   const sessaoAtiva = settings.cicloSessaoAtiva;
   if (!sessaoAtiva || !sessaoAtiva.inicio) {
-    return _cicloTempoAcumuladoMs;
+    return settings.cicloTempoAcumulado;
   }
   const agora = Date.now();
   const tempoSessaoAtual = agora - sessaoAtiva.inicio;
-  return _cicloTempoAcumuladoMs + tempoSessaoAtual;
+  return settings.cicloTempoAcumulado + tempoSessaoAtual;
 }
 
 /**
@@ -2212,6 +2224,18 @@ function renderGlobalCicloTimer() {
   timerElements.forEach(el => {
     el.textContent = tempoFormatado;
   });
+  
+  // Re-renderiza o banner do ciclo ativo para atualizar o tempo exibido
+  const banners = document.querySelectorAll('[id*="ciclo-banner"], .ciclo-banner');
+  if (banners.length > 0) {
+    const sessaoAtiva = settings.cicloSessaoAtiva;
+    if (sessaoAtiva && sessaoAtiva.ativo) {
+      const novoBanner = renderRelogioCicloAtivo();
+      banners.forEach(banner => {
+        banner.outerHTML = novoBanner;
+      });
+    }
+  }
 }
 
 /**
@@ -2223,8 +2247,7 @@ function _iniciarTimerCiclo() {
   }
   
   const sessaoAtiva = settings.cicloSessaoAtiva;
-  if (sessaoAtiva && sessaoAtiva.inicio) {
-    _cicloInicioSessaoTimestamp = sessaoAtiva.inicio;
+  if (sessaoAtiva && sessaoAtiva.inicio && sessaoAtiva.ativo) {
     renderGlobalCicloTimer();
     _globalCicloTimerInterval = setInterval(() => {
       renderGlobalCicloTimer();
@@ -2240,7 +2263,110 @@ function _pararTimerCiclo() {
     clearInterval(_globalCicloTimerInterval);
     _globalCicloTimerInterval = null;
   }
-  _cicloInicioSessaoTimestamp = null;
+}
+
+/**
+ * Renderiza o banner do ciclo ativo com relógio e botões de controle
+ */
+function renderRelogioCicloAtivo() {
+  const sessaoAtiva = settings.cicloSessaoAtiva;
+  if (!sessaoAtiva || !sessaoAtiva.ativo) {
+    return '';
+  }
+  
+  const materiaAtual = sessaoAtiva.materias?.[sessaoAtiva.indiceMateriaAtual] || {};
+  const tempoFormatado = _formatarCronometro(_cicloElapsedMs());
+  
+  return `
+    <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; margin-bottom: 16px; padding: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div>
+          <div style="font-size: 14px; opacity: 0.9;">📚 Ciclo Ativo: ${escapeHtml(sessaoAtiva.nome)}</div>
+          <div style="font-size: 18px; font-weight: bold; margin: 4px 0;">${escapeHtml(materiaAtual.disciplina || '—')}</div>
+          <div style="font-size: 24px; font-family: monospace; margin-top: 8px;">⏱️ <span class="ciclo-timer-display">${tempoFormatado}</span></div>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button onclick="irParaCicloEstudos()" style="background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+            📖 Ver Ciclo
+          </button>
+          <button onclick="pausarCicloAtual()" style="background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+            ⏸️ Pausar
+          </button>
+          <button onclick="pararCicloAtual()" style="background: rgba(255,100,100,0.8); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+            ⏹️ Parar
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Navega para a tela do ciclo de estudos
+ */
+function irParaCicloEstudos() {
+  document.getElementById('tab-ciclo').click();
+}
+
+/**
+ * Pausa o ciclo atual
+ */
+function pausarCicloAtual() {
+  if (!settings.cicloSessaoAtiva) return;
+  
+  // Salva o tempo acumulado até agora
+  const tempoDecorrido = _cicloElapsedMs();
+  settings.cicloTempoAcumulado = tempoDecorrido;
+  
+  // Marca a sessão como inativa
+  settings.cicloSessaoAtiva = { ...settings.cicloSessaoAtiva, ativo: false };
+  saveSettings();
+  
+  // Para o timer
+  _pararTimerCiclo();
+  
+  // Atualiza a interface
+  renderAllViews();
+  alert('Ciclo pausado! O tempo foi salvo.');
+}
+
+/**
+ * Para/finaliza o ciclo atual
+ */
+function pararCicloAtual() {
+  if (!settings.cicloSessaoAtiva) return;
+  
+  if (!confirm('Deseja realmente finalizar este ciclo? O tempo será salvo no histórico.')) {
+    return;
+  }
+  
+  // Salva o tempo acumulado até agora
+  const tempoDecorrido = _cicloElapsedMs();
+  
+  // Adiciona ao histórico de ciclos
+  const cicloHistorico = settings.cicloHistorico || [];
+  const sessaoAtiva = settings.cicloSessaoAtiva;
+  
+  cicloHistorico.push({
+    nome: sessaoAtiva.nome,
+    dataInicio: sessaoAtiva.inicio,
+    dataFim: Date.now(),
+    tempoTotalMs: tempoDecorrido,
+    materias: sessaoAtiva.materias,
+    indiceMateriaFinal: sessaoAtiva.indiceMateriaAtual
+  });
+  
+  settings.cicloHistorico = cicloHistorico;
+  settings.cicloTempoAcumulado = 0;
+  settings.cicloSessaoAtiva = null;
+  saveSettings();
+  
+  // Para o timer
+  _pararTimerCiclo();
+  
+  // Atualiza a interface
+  renderAllViews();
+  alert('Ciclo finalizado! Tempo total registrado.');
 }
 
 function renderResolverIA(view) {
@@ -4692,6 +4818,9 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   window.addEventListener("hashchange", router);
   router();
+
+  // Inicia o timer do ciclo se houver sessão ativa
+  _iniciarTimerCiclo();
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("service-worker.js").catch(() => {});
