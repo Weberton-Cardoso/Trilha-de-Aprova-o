@@ -4,7 +4,7 @@
  * (dados ficam no IndexedDB, não no cache).
  */
 
-const CACHE_NAME = 'trilha-aprovacao-v50';
+const CACHE_NAME = 'trilha-aprovacao-v60';
 
 const ASSETS_TO_CACHE = [
   './',
@@ -18,6 +18,7 @@ const ASSETS_TO_CACHE = [
   './ciclo.js',
   './perfis.js',
   './cloud-sync.js',
+  './ia-gemini.js',
   './manifest.json',
   './assets/icon-192.png',
   './assets/icon-512.png'
@@ -57,8 +58,8 @@ self.addEventListener('activate', (event) => {
 });
 
 // Estratégia: cache-first para os arquivos do app, com fallback de rede.
-// Bibliotecas externas (Chart.js, fontes) usam network-first para não travar
-// caso o CDN atualize, mas caem para cache se estiver offline.
+// Bibliotecas externas (Chart.js, fontes, Firebase modular) usam network-first
+// para não travar caso o CDN atualize, mas caem para cache se estiver offline.
 // Importante: só GET pode ser guardado em cache (a Cache API não suporta
 // POST/PUT/etc — é assim que o Firestore, por exemplo, envia dados).
 self.addEventListener('fetch', (event) => {

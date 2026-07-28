@@ -106,15 +106,16 @@ const state = {
   cicloMaterias: [],
   cicloSessoes: [],
   perfis: [],
+  resumos: [],
   dashboardFiltro: { tipo: '7d', inicio: null, fim: null },
   statsDisciplinaFiltro: { tipo: 'tudo', inicio: null, fim: null, disciplina: 'todas' }
 };
 
 async function reloadState() {
-  const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, perfis] = await Promise.all([
+  const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, perfis, resumos] = await Promise.all([
     db.tentativas.getAll(), db.editais.getAll(), db.simulados.getAll(),
     db.ciclos.getAll(), db.cicloMaterias.getAll(), db.cicloSessoes.getAll(),
-    db.perfis.getAll()
+    db.perfis.getAll(), db.resumos.getAll()
   ]);
   state.perfis = perfis.sort((a, b) => a.ordem - b.ordem);
   state.ciclos = ciclos.sort((a, b) => a.ordem - b.ordem);
@@ -123,6 +124,7 @@ async function reloadState() {
   state.tentativas = tentativas;
   state.editais = editais;
   state.simulados = simulados;
+  state.resumos = resumos;
 }
 
 /** Disciplinas sugeridas por padrão no autocomplete, mesmo antes de qualquer
@@ -339,6 +341,8 @@ function updateActiveNav(route) {
 const PAGE_TITLES = {
   'dashboard': 'Dashboard',
   'tentativas': 'Tentativas',
+  'resolver-ia': 'Resolver com IA',
+  'caderno': 'Caderno de Resumos',
   'importar-historico': 'Importar Histórico',
   'ciclo': 'Ciclo de Estudos',
   'estatisticas/disciplinas': 'Estatísticas por Disciplina',
@@ -348,6 +352,7 @@ const PAGE_TITLES = {
   'editais': 'Editais',
   'editais/importar': 'Importar Edital',
   'simulados': 'Simulados',
+  'simulado-gerado': 'Simulado Personalizado',
   'perfis': 'Perfis',
   'configuracoes': 'Configurações'
 };
@@ -376,6 +381,14 @@ async function router() {
     $('#page-title').textContent = PAGE_TITLES['tentativas'];
     updateActiveNav('tentativas');
     renderTentativas(view);
+  } else if (base === 'resolver-ia') {
+    $('#page-title').textContent = PAGE_TITLES['resolver-ia'];
+    updateActiveNav('resolver-ia');
+    renderResolverIA(view);
+  } else if (base === 'caderno') {
+    $('#page-title').textContent = PAGE_TITLES['caderno'];
+    updateActiveNav('caderno');
+    renderCaderno(view);
   } else if (base === 'importar-historico') {
     $('#page-title').textContent = PAGE_TITLES['importar-historico'];
     updateActiveNav('importar-historico');
@@ -424,6 +437,10 @@ async function router() {
     $('#page-title').textContent = PAGE_TITLES['simulados'];
     updateActiveNav('simulados');
     renderSimulados(view);
+  } else if (base === 'simulado-gerado') {
+    $('#page-title').textContent = _simuladoGerado ? escapeHtml(_simuladoGerado.nome) : PAGE_TITLES['simulado-gerado'];
+    updateActiveNav('simulados');
+    renderSimuladoGerado(view);
   } else if (base === 'perfis') {
     $('#page-title').textContent = PAGE_TITLES['perfis'];
     updateActiveNav('perfis');
@@ -462,14 +479,20 @@ function resolverPeriodo(filtro) {
   }
 }
 
-/** Resumo agregado de uma lista de tentativas (soma questões/acertos/erros) */
+/** Resumo agregado de uma lista de tentativas (soma questões/acertos/erros).
+ *  A taxa de acerto exclui questões em branco do denominador — deixar em
+ *  branco não é a mesma coisa que errar, então não pode penalizar a taxa
+ *  como se fosse erro. "brancos" é derivado (total − certas − erradas), não
+ *  precisa de um campo próprio salvo em cada tentativa. */
 function calcResumo(lista) {
   const tentativas = lista.length;
   const total = lista.reduce((acc, t) => acc + (Number(t.numQuestoes) || 0), 0);
   const certas = lista.reduce((acc, t) => acc + (Number(t.acertos) || 0), 0);
   const erradas = lista.reduce((acc, t) => acc + (Number(t.erros) || 0), 0);
-  const taxa = total ? (certas / total) * 100 : 0;
-  return { tentativas, total, certas, erradas, taxa };
+  const brancos = Math.max(0, total - certas - erradas);
+  const respondidas = certas + erradas;
+  const taxa = respondidas ? (certas / respondidas) * 100 : 0;
+  return { tentativas, total, certas, erradas, brancos, taxa };
 }
 
 /**
@@ -843,49 +866,68 @@ function renderCorrelacaoTipoTaxa() {
 }
 
 /**
+ * Data atualmente selecionada no "Relatório diário de estudos" — controla
+ * qual dia está sendo exibido no card. Começa sempre em hoje ao carregar o
+ * app; navegar com as setas ou o campo de data só muda esse estado local
+ * (não mexe no filtro geral do Dashboard).
+ */
+let _relatorioDiarioData = todayISO();
+
+/**
  * Card "Relatório diário de estudos" — junta numa única tabela, por
- * matéria, tudo que aconteceu HOJE: os tópicos e tipos de estudo vistos
- * (tanto no Ciclo de Estudos quanto nas tentativas de questões), o tempo
- * estudado (Ciclo de Estudos) e o desempenho em questões (tentativas).
- * É sempre referente a hoje — mas como recalcula a cada renderDashboard(),
- * fica "ao vivo": qualquer sessão do ciclo ou tentativa registrada agora
- * aparece aqui assim que a tela for atualizada. Quando o filtro de período
- * do dashboard também está em "Hoje", os cartões de resumo no topo batem
- * exatamente com os totais mostrados aqui.
+ * matéria, tudo que aconteceu num dia (por padrão hoje): os tópicos e
+ * tipos de estudo vistos (tanto no Ciclo de Estudos quanto nas tentativas
+ * de questões), o tempo estudado (Ciclo de Estudos) e o desempenho em
+ * questões (tentativas). Tem setas "◀ ▶" e um campo de data pra navegar
+ * entre dias anteriores — a seta "▶" fica desabilitada em dias futuros.
  */
 function renderRelatorioDiario() {
   const card = $('#card-relatorio-diario');
   if (!card) return;
 
-  const hojeISO = todayISO();
-  const { materias, totais } = calcRelatorioDiario(hojeISO);
+  const dataSelecionada = _relatorioDiarioData;
+  const { materias, totais } = calcRelatorioDiario(dataSelecionada);
   const filtroEhHoje = state.dashboardFiltro.tipo === 'hoje';
+  const ehHoje = dataSelecionada === todayISO();
 
-  card.style.borderColor = filtroEhHoje ? 'var(--gold)' : '';
+  card.style.borderColor = (filtroEhHoje && ehHoje) ? 'var(--gold)' : '';
+
+  const navegacaoHTML = `
+    <div class="flex" style="justify-content:center;align-items:center;gap:10px;margin-bottom:12px;">
+      <button class="btn btn-sm btn-ghost" id="btn-relatorio-dia-anterior" title="Dia anterior">◀</button>
+      <input type="date" id="input-relatorio-data" value="${dataSelecionada}" max="${todayISO()}" style="text-align:center;">
+      <button class="btn btn-sm btn-ghost" id="btn-relatorio-dia-seguinte" title="Próximo dia" ${ehHoje ? 'disabled' : ''}>▶</button>
+      ${!ehHoje ? `<button class="btn btn-sm btn-ghost" id="btn-relatorio-hoje">Hoje</button>` : ''}
+    </div>
+  `;
 
   if (!materias.length) {
     card.innerHTML = `
-      <div class="card-title">🗓️ Relatório diário de estudos — ${toBRDate(hojeISO)}</div>
+      <div class="card-title">🗓️ Relatório diário de estudos — ${toBRDate(dataSelecionada)}</div>
+      ${navegacaoHTML}
       <p class="text-muted" style="font-size:13.5px;margin-top:0;">
-        Nenhuma sessão do Ciclo de Estudos ou tentativa de questões registrada hoje ainda.
-        Assim que você estudar algo ou lançar questões, o resumo do dia aparece aqui, matéria por matéria.
+        ${ehHoje
+          ? 'Nenhuma sessão do Ciclo de Estudos ou tentativa de questões registrada hoje ainda. Assim que você estudar algo ou lançar questões, o resumo do dia aparece aqui, matéria por matéria.'
+          : 'Nenhuma sessão do Ciclo de Estudos ou tentativa de questões registrada nesse dia.'}
       </p>
     `;
+    _wireRelatorioDiarioNav();
     return;
   }
 
   card.innerHTML = `
-    <div class="card-title">🗓️ Relatório diário de estudos — ${toBRDate(hojeISO)}</div>
+    <div class="card-title">🗓️ Relatório diário de estudos — ${toBRDate(dataSelecionada)}</div>
+    ${navegacaoHTML}
     <p class="text-muted" style="font-size:12.5px;margin-top:-6px;margin-bottom:14px;">
-      Combina automaticamente as sessões do Ciclo de Estudos e as tentativas de questões registradas hoje, por matéria.
-      ${filtroEhHoje
+      Combina automaticamente as sessões do Ciclo de Estudos e as tentativas de questões registradas nesse dia, por matéria.
+      ${filtroEhHoje && ehHoje
         ? 'O filtro de período acima está em "Hoje" — os cartões de resumo no topo mostram os mesmos totais.'
-        : 'Este resumo é sempre referente a hoje, independente do filtro de período escolhido acima.'}
+        : 'Este resumo é referente ao dia selecionado acima, independente do filtro de período escolhido no topo do Dashboard.'}
     </p>
 
     <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:16px;">
-      <div class="stat-card info"><div class="label">Tempo total hoje</div><div class="value" style="font-size:20px;">${_formatarMinutos(totais.minutos)}</div></div>
-      <div class="stat-card"><div class="label">Questões hoje</div><div class="value" style="font-size:20px;">${totais.numQuestoes}</div></div>
+      <div class="stat-card info"><div class="label">Tempo total no dia</div><div class="value" style="font-size:20px;">${_formatarMinutos(totais.minutos)}</div></div>
+      <div class="stat-card"><div class="label">Questões no dia</div><div class="value" style="font-size:20px;">${totais.numQuestoes}</div></div>
       <div class="stat-card success"><div class="label">Certas</div><div class="value" style="font-size:20px;">${totais.acertos}</div></div>
       <div class="stat-card danger"><div class="label">Erradas</div><div class="value" style="font-size:20px;">${totais.erros}</div></div>
       <div class="stat-card gold"><div class="label">Taxa de acerto</div><div class="value" style="font-size:20px;">${fmtPct(totais.taxa)}</div></div>
@@ -927,6 +969,38 @@ function renderRelatorioDiario() {
       </table>
     </div>
   `;
+  _wireRelatorioDiarioNav();
+}
+
+/** Conecta as setas de navegação e o campo de data do relatório diário —
+ *  qualquer mudança só re-renderiza esse card específico, sem recarregar
+ *  o resto do Dashboard. */
+function _wireRelatorioDiarioNav() {
+  const somarDias = (iso, n) => {
+    const d = new Date(iso + 'T00:00:00');
+    d.setDate(d.getDate() + n);
+    return toISODate(d);
+  };
+
+  $('#btn-relatorio-dia-anterior')?.addEventListener('click', () => {
+    _relatorioDiarioData = somarDias(_relatorioDiarioData, -1);
+    renderRelatorioDiario();
+  });
+  $('#btn-relatorio-dia-seguinte')?.addEventListener('click', () => {
+    if (_relatorioDiarioData >= todayISO()) return;
+    _relatorioDiarioData = somarDias(_relatorioDiarioData, 1);
+    renderRelatorioDiario();
+  });
+  $('#btn-relatorio-hoje')?.addEventListener('click', () => {
+    _relatorioDiarioData = todayISO();
+    renderRelatorioDiario();
+  });
+  $('#input-relatorio-data')?.addEventListener('change', (e) => {
+    if (e.target.value) {
+      _relatorioDiarioData = e.target.value;
+      renderRelatorioDiario();
+    }
+  });
 }
 
 /**
@@ -990,7 +1064,12 @@ function renderPrioridadeRevisao() {
 
     // Urgência usa pelo menos 1 "dia" no cálculo do score (revisar hoje ainda
     // conta como pouco urgente, mas não zera o score de disciplinas de peso alto).
-    const urgencia = (m.peso || 1) * (100 - taxa) * Math.max(1, diasSemRevisar);
+    // Estudado hoje ainda conta pra urgência (uma disciplina fraca não vira
+    // forte só por ter sido revisada uma vez), mas com um peso bem menor do
+    // que um dia inteiro sem revisar — evita empatar "estudei há 5 minutos"
+    // com "estudei ontem".
+    const fatorDias = diasSemRevisar === 0 ? 0.3 : diasSemRevisar;
+    const urgencia = (m.peso || 1) * (100 - taxa) * fatorDias;
 
     paraCalcular.push({ materia: m, nomeCiclo, taxa, totalQuestoes, diasSemRevisar, urgencia });
   });
@@ -1541,6 +1620,699 @@ function openTentativaModal(tentativa = null) {
 }
 
 /* ============================================================
+   INTEGRAÇÃO COM IA (Firebase AI Logic) — GERAÇÃO DE RESUMO
+   ============================================================
+   Esta função só monta o prompt e faz o parse da resposta. A CHAMADA em si
+   pro Gemini fica isolada em window.chamarGeminiResumo(prompt) — de
+   propósito, pra essa tela funcionar (com erro amigável) mesmo antes do
+   Firebase AI Logic estar configurado, e pra plugar a IA de verdade não
+   exigir mexer em mais nada aqui.
+
+   O que window.chamarGeminiResumo deveria fazer, depois de configurar o
+   Firebase AI Logic no Console (provedor "Gemini Developer API", grátis):
+
+     import { getAI, getGenerativeModel, GoogleAIBackend } from "firebase/ai";
+     const ai = getAI(app, { backend: new GoogleAIBackend() }); // 'app' = seu app do Firebase já inicializado
+     const model = getGenerativeModel(ai, { model: "gemini-3.1-flash-lite" }); // conferir nome do modelo vigente
+
+     window.chamarGeminiResumo = async function(prompt) {
+       const resultado = await model.generateContent(prompt);
+       return resultado.response.text();
+     };
+   ============================================================ */
+
+function _montarPromptResumo({ enunciado, gabaritoOficial, disciplina, assunto }) {
+  return `Você é um professor experiente preparando alunos para concurso público. Vai gerar dois resumos sobre o tema da questão abaixo, no estilo de um caderno de estudos — NÃO no formato de flashcard pergunta/resposta.
+
+MATÉRIA: ${disciplina || '(não informado)'}
+TÓPICO: ${assunto || '(não informado)'}
+QUESTÃO:
+${enunciado}
+
+${gabaritoOficial
+    ? `GABARITO OFICIAL CONFIRMADO: ${gabaritoOficial}`
+    : 'GABARITO: não informado — analise a questão e indique qual alternativa você acredita ser a correta. Isso é só uma sugestão, pode estar errada.'}
+
+Gere:
+
+1. "bruto": explicação COMPLETA e estruturada, no formato abaixo (é o formato que costuma sair melhor pra fixação — siga à risca):
+
+   - Comece com um parágrafo curto direto: **Por que esta é a resposta correta?** seguido da explicação de por que a alternativa certa está certa (base legal/doutrinária/conceitual, sem economizar detalhe).
+   - Se a questão for de múltipla escolha (A a E): depois adicione **Por que as outras alternativas estão incorretas?** seguido de uma lista com um item por alternativa errada, cada um começando com "- **LETRA) nome curto da alternativa:** " e a explicação de por que ela está errada.
+   - Se a questão for Certo/Errado (Cebraspe): em vez da lista de alternativas, adicione **Por que a afirmação está [certa/errada]?** com uma lista numerada ("1. ", "2. ", "3. "...) dos motivos, cada um com um termo em negrito no início (ex.: "1. **Nome do motivo:** explicação").
+   - Feche (em qualquer um dos dois formatos) com um parágrafo iniciado por **Regra de ouro / Resumo prático:** trazendo uma regra prática, mnemônico ou dica de prova sobre o tema, quando fizer sentido existir uma.
+   - Use "**texto**" para negrito e "- " ou "N. " pra itens de lista — não use nenhuma outra marcação (sem #, sem \`código\`, sem links). Cada cabeçalho em negrito (ex.: "**Por que esta é a resposta correta?**") deve ficar SOZINHO na própria linha, com uma linha em branco antes e depois dele — nunca na mesma linha do parágrafo que vem a seguir. Separe parágrafos comuns entre si também com uma linha em branco.
+   - Não tenha medo de escrever bastante se o tema exigir — não corte informação relevante por medo de ser longo. Escreva como se o aluno nunca tivesse visto o assunto.
+
+2. "condensado": versão ultra-compacta, estilo "Comp. privativa U = art.22 · Comum = art.23 (todos entes) · Concorrente = art.24" — frases curtas separadas por "·", sem pergunta, sem negrito, sem lista, só o essencial pra fixação (esse SIM deve ser curto — é o "bruto" que precisa ser completo e estruturado).
+${gabaritoOficial ? '' : '3. "gabaritoSugerido": a letra/valor da alternativa que você acredita ser a correta, ou null se não der pra determinar.'}
+
+Responda SOMENTE em JSON válido, sem markdown fora dos campos, sem texto fora do JSON:
+{"bruto": "...", "condensado": "..."${gabaritoOficial ? '' : ', "gabaritoSugerido": "..."'}}`;
+}
+
+/** Conversor mínimo e seguro de um subconjunto de markdown pra HTML: negrito
+ *  (**texto**), listas com "- " ou "N. ", e parágrafos separados por linha
+ *  em branco — é exatamente (e só) o que _montarPromptResumo pede pra IA
+ *  gerar. SEMPRE escapa o texto primeiro (escapeHtml) e só depois interpreta
+ *  os marcadores nesse texto já escapado — então não existe risco de HTML
+ *  ou script vindo da resposta da IA virar HTML de verdade na tela; o pior
+ *  caso é um "**" ou "-" sobrando sem formatar. */
+function _mdParaHtml(texto) {
+  const linhas = escapeHtml(texto || '').split('\n');
+  const blocos = [];
+  let paragrafoAtual = [];
+  let listaAtual = null; // { tipo: 'ul'|'ol', itens: [] }
+
+  const negrito = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+  function fecharParagrafo() {
+    if (paragrafoAtual.length) {
+      blocos.push(`<p>${paragrafoAtual.join(' ')}</p>`);
+      paragrafoAtual = [];
+    }
+  }
+  function fecharLista() {
+    if (listaAtual) {
+      blocos.push(`<${listaAtual.tipo}>${listaAtual.itens.map(i => `<li>${i}</li>`).join('')}</${listaAtual.tipo}>`);
+      listaAtual = null;
+    }
+  }
+
+  linhas.forEach(linhaRaw => {
+    const linha = linhaRaw.trim();
+    if (!linha) { fecharParagrafo(); fecharLista(); return; }
+
+    const bullet = linha.match(/^-\s+(.*)/);
+    const numerado = linha.match(/^\d+\.\s+(.*)/);
+    const linhaTodaEmNegrito = linha.match(/^\*\*(.+)\*\*$/); // ex.: "**Por que...?**" sozinho na linha
+
+    if (linhaTodaEmNegrito) {
+      // Cabeçalho: fecha o que estava aberto e vira um parágrafo próprio,
+      // pra não colar visualmente no texto seguinte.
+      fecharParagrafo();
+      fecharLista();
+      blocos.push(`<p class="md-heading"><strong>${linhaTodaEmNegrito[1]}</strong></p>`);
+    } else if (bullet) {
+      fecharParagrafo();
+      if (!listaAtual || listaAtual.tipo !== 'ul') { fecharLista(); listaAtual = { tipo: 'ul', itens: [] }; }
+      listaAtual.itens.push(negrito(bullet[1]));
+    } else if (numerado) {
+      fecharParagrafo();
+      if (!listaAtual || listaAtual.tipo !== 'ol') { fecharLista(); listaAtual = { tipo: 'ol', itens: [] }; }
+      listaAtual.itens.push(negrito(numerado[1]));
+    } else {
+      fecharLista();
+      paragrafoAtual.push(negrito(linha));
+    }
+  });
+  fecharParagrafo();
+  fecharLista();
+
+  return blocos.join('');
+}
+
+/** Chama a IA e devolve { bruto, condensado, gabaritoSugerido }. Lança erro
+ *  (com mensagem amigável) se a IA não estiver configurada ou responder em
+ *  formato inesperado — quem chama decide como mostrar isso ao usuário. */
+async function gerarResumoIA(dados, { onStream } = {}) {
+  if (typeof window.chamarGeminiResumo !== 'function') {
+    throw new Error('IA ainda não configurada nesse dispositivo (falta configurar o Firebase AI Logic — ver comentário no código).');
+  }
+  const prompt = _montarPromptResumo(dados);
+  let textoResposta;
+  if (onStream && typeof window.chamarGeminiResumoStream === 'function') {
+    textoResposta = await window.chamarGeminiResumoStream(prompt, onStream);
+  } else {
+    textoResposta = await window.chamarGeminiResumo(prompt);
+  }
+  const limpo = String(textoResposta || '').replace(/```json|```/g, '').trim();
+  let parsed;
+  try {
+    parsed = JSON.parse(limpo);
+  } catch (err) {
+    throw new Error('A IA respondeu num formato inesperado. Tente gerar de novo.');
+  }
+  return {
+    bruto: parsed.bruto || '',
+    condensado: parsed.condensado || '',
+    gabaritoSugerido: parsed.gabaritoSugerido || null
+  };
+}
+
+/* ============================================================
+   TELA: RESOLVER COM IA
+   ============================================================
+   Fluxo: cola a questão -> IA gera explicação + resumo condensado -> você
+   confirma o gabarito (informado ou corrigindo a sugestão da IA) e marca o
+   resultado (certa/errada/branco) -> salva. Nada é gravado no banco antes
+   dessa confirmação. Sem limite de questões por sessão — o contador do
+   rodapé é só informativo, você para quando quiser.
+   ============================================================ */
+
+// Dados da matéria/tópico/banca/concurso ficam persistentes entre uma
+// questão e outra da mesma sessão (não precisa redigitar a cada questão).
+let _resolverIASessao = { disciplina: '', assunto: '', banca: '', concurso: '' };
+// Questão atual sendo resolvida: null enquanto não gera nenhum resumo ainda.
+let _resolverIAAtual = null;
+// Só contagem visual da sessão (não persiste — reseta ao recarregar a página).
+let _resolverIAContagem = { certas: 0, erradas: 0, brancos: 0 };
+
+function renderResolverIA(view) {
+  view.innerHTML = `
+    <div class="card mb-12">
+      <div class="card-title" style="margin-bottom:12px;">Matéria da questão</div>
+      <div class="form-grid-2">
+        <div class="form-row">
+          <label>Disciplina</label>
+          <div class="autocomplete-wrap">
+            <input type="text" id="ia-disciplina" autocomplete="off" value="${escapeHtml(_resolverIASessao.disciplina)}" placeholder="Ex: Direito Constitucional">
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Tópico</label>
+          <div class="autocomplete-wrap">
+            <input type="text" id="ia-assunto" autocomplete="off" value="${escapeHtml(_resolverIASessao.assunto)}" placeholder="Ex: Organização do Estado">
+          </div>
+        </div>
+      </div>
+      <div class="form-grid-2">
+        <div class="form-row">
+          <label>Banca (opcional)</label>
+          <div class="autocomplete-wrap">
+            <input type="text" id="ia-banca" autocomplete="off" value="${escapeHtml(_resolverIASessao.banca)}" placeholder="Ex: CESPE/CEBRASPE">
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Concurso (opcional)</label>
+          <div class="autocomplete-wrap">
+            <input type="text" id="ia-concurso" autocomplete="off" value="${escapeHtml(_resolverIASessao.concurso)}" placeholder="Ex: TCDF">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-12">
+      <div class="card-title" style="margin-bottom:12px;">Questão</div>
+      <div class="form-row">
+        <label>Cole aqui o enunciado e as alternativas</label>
+        <textarea id="ia-enunciado" rows="14" placeholder="Cole a questão completa...">${escapeHtml(_resolverIAAtual?.enunciado || '')}</textarea>
+      </div>
+      <div class="form-grid-2">
+        <div class="form-row">
+          <label>Gabarito oficial (se já souber) — opcional</label>
+          <input type="text" id="ia-gabarito-oficial" value="${escapeHtml(_resolverIAAtual?.gabaritoOficial || '')}" placeholder="Ex: C, ou 'Certo'">
+        </div>
+        <div class="form-row">
+          <label>Sua resposta marcada (opcional)</label>
+          <input type="text" id="ia-resposta-marcada" value="${escapeHtml(_resolverIAAtual?.respostaMarcada || '')}" placeholder="Ex: A">
+        </div>
+      </div>
+      <button class="btn btn-primary btn-block" id="btn-gerar-resumo-ia">
+        ${_resolverIAAtual?.bruto ? '🔄 Gerar de novo' : '✨ Gerar explicação com IA'}
+      </button>
+    </div>
+
+    <div id="ia-resultado-wrap"></div>
+
+    <div class="card" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+      <div class="text-muted" style="font-size:13px;">
+        Nesta sessão: <b style="color:var(--text);">${_resolverIAContagem.certas + _resolverIAContagem.erradas + _resolverIAContagem.brancos}</b> questões ·
+        <span style="color:var(--success)">${_resolverIAContagem.certas} certas</span> ·
+        <span style="color:var(--danger)">${_resolverIAContagem.erradas} erradas</span> ·
+        ${_resolverIAContagem.brancos} em branco
+      </div>
+      <button class="btn btn-ghost btn-sm" id="btn-finalizar-sessao-ia">Finalizar por aqui → ver Caderno</button>
+    </div>
+  `;
+
+  attachAutocomplete($('#ia-disciplina'), valoresUnicos('disciplina'));
+  attachAutocomplete($('#ia-assunto'), () => valoresAssuntoParaDisciplina($('#ia-disciplina').value));
+  attachAutocomplete($('#ia-banca'), valoresUnicos('banca'));
+  attachAutocomplete($('#ia-concurso'), valoresUnicos('concurso'));
+
+  ['disciplina', 'assunto', 'banca', 'concurso'].forEach(campo => {
+    $(`#ia-${campo}`).addEventListener('change', (e) => { _resolverIASessao[campo] = e.target.value.trim(); });
+  });
+
+  $('#btn-finalizar-sessao-ia').addEventListener('click', () => { location.hash = '#/caderno'; });
+
+  $('#btn-gerar-resumo-ia').addEventListener('click', async () => {
+    const enunciado = $('#ia-enunciado').value.trim();
+    if (!enunciado) { showToast('Cole o enunciado da questão primeiro.', 'danger'); return; }
+
+    const disciplinaPreenchida = $('#ia-disciplina').value.trim();
+    if (!disciplinaPreenchida) {
+      showToast('Preencha a Disciplina antes de gerar — sem isso o resumo fica sem matéria no Caderno.', 'danger');
+      $('#ia-disciplina').focus();
+      return;
+    }
+
+    const gabaritoOficial = $('#ia-gabarito-oficial').value.trim();
+    const respostaMarcada = $('#ia-resposta-marcada').value.trim();
+
+    // Captura os campos de matéria direto do DOM aqui (não só via listener
+    // de 'change') — se o usuário selecionou pelo autocomplete ou clicou
+    // direto em "Gerar" sem tirar o foco do campo, o evento 'change' pode
+    // não ter disparado ainda, e o re-render que acontece depois de gerar
+    // reconstrói o formulário a partir de _resolverIASessao. Sem isso, os
+    // campos voltavam vazios ("(Sem matéria)") mesmo com o texto digitado.
+    _resolverIASessao = {
+      disciplina: $('#ia-disciplina').value.trim(),
+      assunto: $('#ia-assunto').value.trim(),
+      banca: $('#ia-banca').value.trim(),
+      concurso: $('#ia-concurso').value.trim()
+    };
+    const { disciplina, assunto } = _resolverIASessao;
+
+    const btn = $('#btn-gerar-resumo-ia');
+    btn.disabled = true;
+    btn.textContent = 'Gerando...';
+
+    // Mostra preview de streaming enquanto a IA responde
+    const resultWrap = $('#ia-resultado-wrap');
+    resultWrap.innerHTML = `
+      <div class="card mb-12" id="ia-streaming-preview">
+        <div class="card-title" style="margin-bottom:10px;">
+          Gerando explicação…
+          <span id="ia-stream-chars" style="font-size:12px;color:var(--text-muted);font-weight:normal;margin-left:6px;"></span>
+        </div>
+        <div id="ia-stream-text" style="line-height:1.6;font-size:13.5px;color:var(--text);min-height:60px;opacity:0.75;white-space:pre-wrap;"></div>
+      </div>
+    `;
+
+    // Extrai o campo "bruto" parcialmente do JSON que vai chegando em stream
+    function _extrairBrutoStream(raw) {
+      const m = raw.match(/"bruto"\s*:\s*"([\s\S]*?)(?="condensado"|$)/);
+      if (!m) return null;
+      return m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    }
+
+    try {
+      const ia = await gerarResumoIA({ enunciado, gabaritoOficial, disciplina, assunto }, {
+        onStream(acumulado) {
+          const charsEl = $('#ia-stream-chars');
+          const textEl = $('#ia-stream-text');
+          if (!charsEl || !textEl) return;
+          charsEl.textContent = `${acumulado.length} caracteres`;
+          const parcial = _extrairBrutoStream(acumulado);
+          if (parcial) textEl.textContent = parcial;
+        }
+      });
+      _resolverIAAtual = {
+        enunciado, gabaritoOficial, respostaMarcada,
+        bruto: ia.bruto,
+        condensado: ia.condensado,
+        gabaritoSugerido: ia.gabaritoSugerido,
+        gabaritoConfirmado: gabaritoOficial || ia.gabaritoSugerido || '',
+        resultado: null
+      };
+      renderResolverIA(view);
+    } catch (err) {
+      showToast(err.message || 'Não foi possível gerar o resumo agora.', 'danger');
+      btn.disabled = false;
+      btn.textContent = '✨ Gerar explicação com IA';
+      resultWrap.innerHTML = '';
+    }
+  });
+
+  _renderResolverIAResultado(view);
+}
+
+function _renderResolverIAResultado(view) {
+  const wrap = $('#ia-resultado-wrap');
+  if (!wrap || !_resolverIAAtual || !_resolverIAAtual.bruto) { if (wrap) wrap.innerHTML = ''; return; }
+
+  const r = _resolverIAAtual;
+  const foiInformado = !!r.gabaritoOficial;
+
+  wrap.innerHTML = `
+    <div class="card mb-12">
+      <div class="card-title" style="margin-bottom:10px;">Explicação gerada</div>
+
+      ${foiInformado
+        ? `<span class="badge success" style="margin-bottom:10px;display:inline-block;">Gabarito informado: ${escapeHtml(r.gabaritoOficial)}</span>`
+        : `<span class="badge muted" style="margin-bottom:10px;display:inline-block;">🤖 IA sugere: ${escapeHtml(r.gabaritoSugerido || '—')} (confirme antes de salvar)</span>`
+      }
+
+      <div class="texto-resumo-bruto" style="line-height:1.6;font-size:13.5px;color:var(--text);margin:8px 0 14px;">${_mdParaHtml(r.bruto)}</div>
+
+      <div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:13px;margin-bottom:16px;">
+        📎 ${escapeHtml(r.condensado)}
+      </div>
+
+      <div class="form-grid-2">
+        <div class="form-row">
+          <label>Gabarito confirmado (obrigatório pra salvar)</label>
+          <input type="text" id="ia-gabarito-confirmado" value="${escapeHtml(r.gabaritoConfirmado || '')}" placeholder="Ex: C">
+        </div>
+        <div class="form-row" style="align-self:flex-end;">
+          <button class="btn btn-sm" id="btn-regenerar-com-gabarito">🔄 Regenerar explicação com esse gabarito</button>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label>Como foi essa questão?</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-sm ${r.resultado === 'certa' ? 'btn-primary' : ''}" data-resultado="certa">✅ Acertei</button>
+          <button class="btn btn-sm ${r.resultado === 'errada' ? 'btn-primary' : ''}" data-resultado="errada">❌ Errei</button>
+          <button class="btn btn-sm ${r.resultado === 'branco' ? 'btn-primary' : ''}" data-resultado="branco">⬜ Deixei em branco</button>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn btn-ghost btn-sm" id="btn-descartar-ia">Descartar</button>
+        <button class="btn btn-primary btn-sm" id="btn-salvar-ia" ${(!r.resultado) ? 'disabled' : ''}>Salvar e ir pra próxima questão</button>
+      </div>
+    </div>
+  `;
+
+  $$('[data-resultado]', wrap).forEach(btn => btn.addEventListener('click', () => {
+    _resolverIAAtual.resultado = btn.dataset.resultado;
+    _renderResolverIAResultado(view);
+  }));
+
+  $('#ia-gabarito-confirmado').addEventListener('change', (e) => {
+    _resolverIAAtual.gabaritoConfirmado = e.target.value.trim();
+  });
+
+  $('#btn-regenerar-com-gabarito').addEventListener('click', async () => {
+    const gabaritoCorrigido = $('#ia-gabarito-confirmado').value.trim();
+    if (!gabaritoCorrigido) { showToast('Informe o gabarito antes de regenerar.', 'danger'); return; }
+    const btn = $('#btn-regenerar-com-gabarito');
+    btn.disabled = true;
+    btn.textContent = 'Regenerando...';
+    try {
+      const ia = await gerarResumoIA({
+        enunciado: r.enunciado,
+        gabaritoOficial: gabaritoCorrigido,
+        disciplina: $('#ia-disciplina').value.trim(),
+        assunto: $('#ia-assunto').value.trim()
+      });
+      _resolverIAAtual.gabaritoOficial = gabaritoCorrigido;
+      _resolverIAAtual.gabaritoConfirmado = gabaritoCorrigido;
+      _resolverIAAtual.bruto = ia.bruto;
+      _resolverIAAtual.condensado = ia.condensado;
+      _renderResolverIAResultado(view);
+      showToast('Explicação regenerada.', 'success');
+    } catch (err) {
+      showToast(err.message || 'Não foi possível regenerar agora.', 'danger');
+      btn.disabled = false;
+      btn.textContent = '🔄 Regenerar explicação com esse gabarito';
+    }
+  });
+
+  $('#btn-descartar-ia').addEventListener('click', () => {
+    _resolverIAAtual = null;
+    renderResolverIA(view);
+  });
+
+  $('#btn-salvar-ia').addEventListener('click', async () => {
+    const gabaritoConfirmado = $('#ia-gabarito-confirmado').value.trim();
+    if (!gabaritoConfirmado) { showToast('Confirme o gabarito antes de salvar.', 'danger'); return; }
+    if (!r.resultado) { showToast('Marque se você acertou, errou ou deixou em branco.', 'danger'); return; }
+
+    const disciplina = $('#ia-disciplina').value.trim();
+    const assunto = $('#ia-assunto').value.trim();
+    const banca = $('#ia-banca').value.trim();
+    const concurso = $('#ia-concurso').value.trim();
+    const respostaMarcada = $('#ia-resposta-marcada').value.trim();
+
+    const acertos = r.resultado === 'certa' ? 1 : 0;
+    const erros = r.resultado === 'errada' ? 1 : 0;
+    const taxa = (acertos + erros) ? (acertos / (acertos + erros)) * 100 : 0;
+
+    const novaTentativaId = await db.tentativas.add({
+      disciplina, assunto, banca, concurso,
+      data: todayISO(),
+      numQuestoes: 1,
+      acertos, erros, taxa,
+      tipo: 'Questão avulsa (Resolver com IA)',
+      observacoes: '',
+      enunciado: r.enunciado,
+      resultado: r.resultado,
+      respostaMarcada: respostaMarcada || null,
+      gabaritoConfirmado
+    });
+
+    await db.resumos.add({
+      tentativaId: novaTentativaId,
+      materia: disciplina,
+      topico: assunto,
+      data: todayISO(),
+      textoBruto: r.bruto,
+      textoCondensado: r.condensado,
+      enviadoAnki: false,
+      ankiDeck: null
+    });
+
+    _resolverIAContagem[r.resultado === 'certa' ? 'certas' : r.resultado === 'errada' ? 'erradas' : 'brancos']++;
+    _resolverIASessao = { disciplina, assunto, banca, concurso };
+    _resolverIAAtual = null;
+
+    await reloadState();
+    updateStreakMini();
+    showToast('Questão registrada e resumo salvo no Caderno.', 'success');
+    renderResolverIA(view);
+    $('#ia-enunciado')?.focus();
+  });
+}
+
+/* ============================================================
+   TELA: CADERNO DE RESUMOS
+   ============================================================
+   Mostra state.resumos organizados em árvore Matéria -> Tópico, com as
+   entradas do tópico selecionado agrupadas por sessão (mesmo dia),
+   mais recente primeiro. Reaproveita a mesma normalização de nome usada em
+   calcRelatorioDiario, pra "Direito Constitucional" e "direito constitucional"
+   caírem no mesmo grupo.
+   ============================================================ */
+
+let _cadernoSelecao = { materia: null, topico: null };
+let _cadernoBusca = '';
+
+/** Agrupa state.resumos em { materia -> { topico -> [resumos] } }, com
+ *  contagem por nó, pronta pra desenhar a árvore da sidebar do Caderno. */
+function calcCadernoArvore() {
+  const norm = (s) => (s || '').trim().toLowerCase();
+  const arvore = new Map(); // chaveNorm materia -> { nome, topicos: Map(chaveNorm topico -> {nome, resumos:[]}) }
+
+  state.resumos.forEach(r => {
+    const nomeMateria = (r.materia || '').trim() || '(Sem matéria)';
+    const nomeTopico = (r.topico || '').trim() || '(Sem tópico)';
+    const chaveMateria = norm(nomeMateria);
+    const chaveTopico = norm(nomeTopico);
+
+    if (!arvore.has(chaveMateria)) arvore.set(chaveMateria, { nome: nomeMateria, topicos: new Map() });
+    const materiaNode = arvore.get(chaveMateria);
+
+    if (!materiaNode.topicos.has(chaveTopico)) materiaNode.topicos.set(chaveTopico, { nome: nomeTopico, resumos: [] });
+    materiaNode.topicos.get(chaveTopico).resumos.push(r);
+  });
+
+  return arvore;
+}
+
+function renderCaderno(view) {
+  const arvore = calcCadernoArvore();
+  const materias = Array.from(arvore.values()).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+
+  if (!materias.length) {
+    view.innerHTML = `
+      <div class="empty-state">
+        <p>Nenhum resumo no Caderno ainda.</p>
+        <p class="text-muted" style="font-size:13px;">Resolva questões na tela "Resolver com IA" para começar a preencher o Caderno automaticamente.</p>
+        <button class="btn btn-primary" id="empty-ir-resolver-ia">Ir para Resolver com IA</button>
+      </div>
+    `;
+    $('#empty-ir-resolver-ia').addEventListener('click', () => { location.hash = '#/resolver-ia'; });
+    return;
+  }
+
+  // Se nada selecionado ainda (ou seleção antiga não existe mais), seleciona a primeira matéria.
+  if (!_cadernoSelecao.materia || !arvore.has(norm2(_cadernoSelecao.materia))) {
+    _cadernoSelecao = { materia: materias[0].nome, topico: null };
+  }
+
+  view.innerHTML = `
+    <div class="caderno-layout">
+      <div class="caderno-sidebar" id="caderno-sidebar"></div>
+      <div class="caderno-main" id="caderno-main"></div>
+    </div>
+  `;
+
+  function norm2(s) { return (s || '').trim().toLowerCase(); }
+
+  function renderSidebar() {
+    const sidebar = $('#caderno-sidebar');
+    sidebar.innerHTML = materias.map(m => {
+      const aberta = norm2(m.nome) === norm2(_cadernoSelecao.materia);
+      const topicos = Array.from(m.topicos.values()).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+      return `
+        <div class="caderno-materia">
+          <div class="caderno-materia-head" data-materia="${escapeHtml(m.nome)}">
+            <span class="arrow">${aberta ? '▾' : '▸'}</span> ${escapeHtml(m.nome)}
+          </div>
+          ${aberta ? `
+            <div class="caderno-topicos">
+              ${topicos.map(t => `
+                <div class="caderno-topico ${norm2(t.nome) === norm2(_cadernoSelecao.topico) ? 'active' : ''}" data-topico="${escapeHtml(t.nome)}">
+                  <span>${escapeHtml(t.nome)}</span><span class="count">${t.resumos.length}</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+
+    $$('.caderno-materia-head', sidebar).forEach(el => el.addEventListener('click', () => {
+      const nome = el.dataset.materia;
+      _cadernoSelecao = norm2(_cadernoSelecao.materia) === norm2(nome)
+        ? { materia: null, topico: null }
+        : { materia: nome, topico: null };
+      renderSidebar();
+      renderMain();
+    }));
+    $$('.caderno-topico', sidebar).forEach(el => el.addEventListener('click', () => {
+      _cadernoSelecao.topico = el.dataset.topico;
+      renderSidebar();
+      renderMain();
+    }));
+  }
+
+  function renderMain() {
+    const main = $('#caderno-main');
+    const materiaNode = materias.find(m => norm2(m.nome) === norm2(_cadernoSelecao.materia));
+
+    if (!materiaNode) { main.innerHTML = `<p class="text-muted">Selecione uma matéria ao lado.</p>`; return; }
+
+    const topicoNode = _cadernoSelecao.topico
+      ? materiaNode.topicos.get(norm2(_cadernoSelecao.topico))
+      : null;
+
+    let resumos = topicoNode
+      ? topicoNode.resumos
+      : Array.from(materiaNode.topicos.values()).flatMap(t => t.resumos);
+
+    const termo = _cadernoBusca.trim().toLowerCase();
+    if (termo) {
+      resumos = resumos.filter(r =>
+        (r.textoBruto || '').toLowerCase().includes(termo) ||
+        (r.textoCondensado || '').toLowerCase().includes(termo)
+      );
+    }
+
+    resumos = [...resumos].sort((a, b) => (b.data || '').localeCompare(a.data || '') || (b.id - a.id));
+
+    // Agrupa por data só pra exibição (sessão = mesmo dia).
+    const porData = new Map();
+    resumos.forEach(r => {
+      const d = r.data || '(sem data)';
+      if (!porData.has(d)) porData.set(d, []);
+      porData.get(d).push(r);
+    });
+
+    main.innerHTML = `
+      <div class="flex" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+        <div>
+          <div class="text-muted" style="font-size:12.5px;">${escapeHtml(materiaNode.nome)}</div>
+          <h2 style="margin:2px 0 0;font-size:19px;">${escapeHtml(topicoNode ? topicoNode.nome : 'Todos os tópicos')}</h2>
+        </div>
+        <input type="text" id="caderno-busca" class="search-input" style="max-width:260px;" placeholder="🔍 Buscar nos resumos..." value="${escapeHtml(_cadernoBusca)}">
+      </div>
+
+      ${!resumos.length ? `<p class="text-muted">Nenhum resumo encontrado.</p>` : Array.from(porData.entries()).map(([data, itens]) => `
+        <div class="sessao" style="margin-bottom:22px;">
+          <div class="flex" style="align-items:center;gap:10px;margin-bottom:10px;">
+            <span style="font-size:12px;color:var(--text-muted);background:var(--surface-2);padding:3px 10px;border-radius:999px;">${data === todayISO() ? 'Hoje' : toBRDate(data)}</span>
+            <div style="flex:1;height:1px;background:var(--border);"></div>
+          </div>
+          ${itens.map(r => {
+            const t = state.tentativas.find(x => x.id === r.tentativaId);
+            return `
+            <div class="card mb-12">
+              <div class="flex" style="justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+                <div style="font-size:12px;color:var(--text-muted);">
+                  ${t ? `<b style="color:var(--text)">${escapeHtml(t.disciplina)}</b> · <span class="badge ${t.resultado === 'certa' ? 'success' : t.resultado === 'errada' ? 'danger' : 'muted'}">${t.resultado === 'certa' ? 'Certa' : t.resultado === 'errada' ? 'Errada' : 'Branco'}</span>` : 'Resumo avulso'}
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                  <button class="btn btn-sm" data-editar-resumo="${r.id}">✏️ Editar</button>
+                  <button class="btn btn-sm btn-ghost" data-excluir-resumo="${r.id}">🗑 Excluir</button>
+                  <button class="btn btn-sm ${r.enviadoAnki ? 'enviado' : ''}" data-enviar-anki="${r.id}" ${r.enviadoAnki ? 'disabled' : ''}>
+                    ${r.enviadoAnki ? '✓ Enviado ao Anki' : 'Enviar pro Anki'}
+                  </button>
+                </div>
+              </div>
+              <div style="line-height:1.6;font-size:13.5px;color:var(--text);margin:8px 0;">${_mdParaHtml(r.textoBruto)}</div>
+              ${r.textoCondensado ? `<div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:13px;margin-top:10px;">📎 ${escapeHtml(r.textoCondensado)}</div>` : ''}
+            </div>
+          `; }).join('')}
+        </div>
+      `).join('')}
+    `;
+
+    $('#caderno-busca').addEventListener('input', (e) => {
+      _cadernoBusca = e.target.value;
+      renderMain();
+    });
+
+    $$('[data-enviar-anki]', main).forEach(btn => btn.addEventListener('click', () => {
+      // Fase 2 do roadmap (AnkiConnect) ainda não está plugada — placeholder por enquanto.
+      showToast('Integração com Anki ainda não configurada nesta tela (próxima fase do roadmap).', '');
+    }));
+
+    $$('[data-excluir-resumo]', main).forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('Excluir este resumo do Caderno? Essa ação não pode ser desfeita.')) return;
+      await db.resumos.remove(Number(btn.dataset.excluirResumo));
+      await reloadState();
+      renderCaderno(view);
+      showToast('Resumo excluído.', 'danger');
+    }));
+
+    $$('[data-editar-resumo]', main).forEach(btn => btn.addEventListener('click', async () => {
+      const id = Number(btn.dataset.editarResumo);
+      const resumo = state.resumos.find(r => r.id === id);
+      if (!resumo) return;
+      openModal(`
+        <h2>Editar resumo</h2>
+        <form id="form-editar-resumo">
+          <div class="form-row">
+            <label>Explicação completa</label>
+            <textarea name="textoBruto" rows="12" style="font-size:13px;">${escapeHtml(resumo.textoBruto || '')}</textarea>
+          </div>
+          <div class="form-row">
+            <label>Versão condensada</label>
+            <textarea name="textoCondensado" rows="3" style="font-size:13px;">${escapeHtml(resumo.textoCondensado || '')}</textarea>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" id="btn-cancelar-editar-resumo">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Salvar alterações</button>
+          </div>
+        </form>
+      `);
+      $('#btn-cancelar-editar-resumo').addEventListener('click', closeModal);
+      $('#form-editar-resumo').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        await db.resumos.update({
+          ...resumo,
+          textoBruto: fd.get('textoBruto').trim(),
+          textoCondensado: fd.get('textoCondensado').trim()
+        });
+        closeModal();
+        await reloadState();
+        renderCaderno(view);
+        showToast('Resumo atualizado.', 'success');
+      });
+    }));
+  }
+
+  renderSidebar();
+  renderMain();
+}
+
+/* ============================================================
    TELA: ESTATÍSTICAS (agrupamentos: disciplina/assunto/banca/concurso)
    ============================================================ */
 
@@ -1877,39 +2649,553 @@ function renderSimulados(view) {
       <button class="btn btn-primary" id="empty-add-simulado">Cadastrar simulado</button>
     </div>`;
     $('#empty-add-simulado')?.addEventListener('click', () => openSimuladoModal());
+  } else {
+    wrap.innerHTML = `
+      <table>
+        <thead><tr><th>Data</th><th>Nome</th><th>Questões</th><th>Acertos</th><th>Erros</th><th>Aproveitamento</th><th>Tempo</th><th></th></tr></thead>
+        <tbody>
+          ${lista.map(s => {
+            const pct = s.numQuestoes ? (s.acertos / s.numQuestoes) * 100 : 0;
+            return `
+            <tr>
+              <td class="num">${toBRDate(s.data)}</td>
+              <td>${escapeHtml(s.nome)}</td>
+              <td class="num">${s.numQuestoes}</td>
+              <td class="num" style="color:var(--success)">${s.acertos}</td>
+              <td class="num" style="color:var(--danger)">${s.erros}</td>
+              <td>${fmtPct(pct)}</td>
+              <td class="num">${s.tempo ? fmtTempo(s.tempo) : '-'}</td>
+              <td><button class="icon-btn" data-del-sim="${s.id}" title="Excluir">
+                <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M6 7h12l-1 14H7zM9 4h6l1 2H8zM9 10v8M12 10v8M15 10v8"/></svg>
+              </button></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    `;
+    $$('[data-del-sim]', wrap).forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('Excluir este simulado?')) return;
+      await db.simulados.remove(Number(btn.dataset.delSim));
+      await reloadState();
+      renderSimulados(view);
+      showToast('Simulado excluído.', 'danger');
+    }));
+  }
+
+  // Banco pessoal de questões do Resolver com IA
+  _renderBancoQuestoesIA(view);
+}
+
+/* ============================================================
+   BANCO PESSOAL DE QUESTÕES (Resolver com IA)
+   Seção exibida abaixo dos simulados com todas as questões
+   resolvidas pelo "Resolver com IA", cada uma com enunciado,
+   gabarito, resultado e o comentário gerado pela IA.
+   ============================================================ */
+
+function _renderBancoQuestoesIA(view) {
+  const questoesIA = state.tentativas
+    .filter(t => t.tipo === 'Questão avulsa (Resolver com IA)' && t.enunciado)
+    .sort((a, b) => (b.data || '').localeCompare(a.data || '') || (b.id - a.id));
+
+  const secao = document.createElement('div');
+  secao.style.marginTop = '24px';
+
+  if (!questoesIA.length) {
+    secao.innerHTML = `
+      <div class="section-title">Banco Pessoal de Questões (IA)</div>
+      <div class="card">
+        <p class="text-muted" style="font-size:13.5px;margin:0;">
+          Nenhuma questão no banco ainda. Use "Resolver com IA" para resolver questões —
+          elas são salvas aqui automaticamente com o comentário gerado pela IA.
+        </p>
+      </div>
+    `;
+    view.appendChild(secao);
     return;
   }
 
-  wrap.innerHTML = `
-    <table>
-      <thead><tr><th>Data</th><th>Nome</th><th>Questões</th><th>Acertos</th><th>Erros</th><th>Aproveitamento</th><th>Tempo</th><th></th></tr></thead>
-      <tbody>
-        ${lista.map(s => {
-          const pct = s.numQuestoes ? (s.acertos / s.numQuestoes) * 100 : 0;
-          return `
-          <tr>
-            <td class="num">${toBRDate(s.data)}</td>
-            <td>${escapeHtml(s.nome)}</td>
-            <td class="num">${s.numQuestoes}</td>
-            <td class="num" style="color:var(--success)">${s.acertos}</td>
-            <td class="num" style="color:var(--danger)">${s.erros}</td>
-            <td>${fmtPct(pct)}</td>
-            <td class="num">${s.tempo ? fmtTempo(s.tempo) : '-'}</td>
-            <td><button class="icon-btn" data-del-sim="${s.id}" title="Excluir">
-              <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M6 7h12l-1 14H7zM9 4h6l1 2H8zM9 10v8M12 10v8M15 10v8"/></svg>
-            </button></td>
-          </tr>`;
-        }).join('')}
-      </tbody>
-    </table>
+  secao.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
+      <div class="section-title" style="margin:0;">
+        Banco Pessoal de Questões (IA)
+        <span style="font-size:14px;font-weight:normal;color:var(--text-muted);margin-left:6px;">${questoesIA.length} questão${questoesIA.length !== 1 ? 'ões' : ''}</span>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <button class="btn btn-primary btn-sm" id="btn-gerar-simulado-ia">🎯 Gerar Simulado</button>
+        <input type="text" id="banco-ia-busca" class="search-input" style="max-width:200px;" placeholder="🔍 Buscar…">
+      </div>
+    </div>
+    <div id="banco-ia-lista"></div>
   `;
-  $$('[data-del-sim]', wrap).forEach(btn => btn.addEventListener('click', async () => {
-    if (!confirm('Excluir este simulado?')) return;
-    await db.simulados.remove(Number(btn.dataset.delSim));
-    await reloadState();
-    renderSimulados(view);
-    showToast('Simulado excluído.', 'danger');
+
+  view.appendChild(secao);
+
+  let _bancoBusca = '';
+
+  function renderListaBanco() {
+    const termo = _bancoBusca.trim().toLowerCase();
+    let lista = questoesIA;
+    if (termo) {
+      lista = lista.filter(t =>
+        (t.enunciado || '').toLowerCase().includes(termo) ||
+        (t.disciplina || '').toLowerCase().includes(termo) ||
+        (t.assunto || '').toLowerCase().includes(termo) ||
+        (t.banca || '').toLowerCase().includes(termo)
+      );
+    }
+
+    const listaEl = $('#banco-ia-lista');
+    if (!lista.length) {
+      listaEl.innerHTML = `<p class="text-muted" style="padding:8px 0;">Nenhuma questão encontrada para essa busca.</p>`;
+      return;
+    }
+
+    listaEl.innerHTML = lista.map(t => {
+      const resumo = state.resumos.find(r => r.tentativaId === t.id);
+      const resultadoClass = t.resultado === 'certa' ? 'success' : t.resultado === 'errada' ? 'danger' : 'muted';
+      const resultadoLabel = t.resultado === 'certa' ? 'Certa' : t.resultado === 'errada' ? 'Errada' : 'Branco';
+      return `
+        <div class="card mb-12">
+          <div class="flex" style="justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+            <div>
+              <b style="font-size:14px;">${escapeHtml(t.disciplina || '(Sem disciplina)')}</b>
+              ${t.assunto ? `<span style="color:var(--text-muted);font-size:13px;"> · ${escapeHtml(t.assunto)}</span>` : ''}
+              ${t.banca ? `<span style="color:var(--text-muted);font-size:12px;"> · ${escapeHtml(t.banca)}</span>` : ''}
+              ${t.concurso ? `<span style="color:var(--text-muted);font-size:12px;"> · ${escapeHtml(t.concurso)}</span>` : ''}
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <span class="badge ${resultadoClass}">${resultadoLabel}</span>
+              <span style="font-size:12px;color:var(--text-muted);">${toBRDate(t.data)}</span>
+              ${t.gabaritoConfirmado ? `<span style="font-size:12px;background:var(--surface-2);padding:2px 8px;border-radius:4px;">Gabarito: <b>${escapeHtml(t.gabaritoConfirmado)}</b></span>` : ''}
+            </div>
+          </div>
+          <details>
+            <summary style="cursor:pointer;font-size:13px;color:var(--primary);user-select:none;margin-bottom:4px;">Ver enunciado completo</summary>
+            <div style="white-space:pre-wrap;font-size:13px;color:var(--text);line-height:1.6;margin:8px 0;padding:10px;background:var(--surface-2);border-radius:6px;">${escapeHtml(t.enunciado || '')}</div>
+          </details>
+          ${resumo ? `
+            <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">💡 Comentário da IA</div>
+              <div style="line-height:1.6;font-size:13px;color:var(--text);">${_mdParaHtml(resumo.textoBruto)}</div>
+              ${resumo.textoCondensado ? `<div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:12px;margin-top:8px;">📎 ${escapeHtml(resumo.textoCondensado)}</div>` : ''}
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+  }
+
+  renderListaBanco();
+
+  $('#banco-ia-busca')?.addEventListener('input', (e) => {
+    _bancoBusca = e.target.value;
+    renderListaBanco();
+  });
+
+  $('#btn-gerar-simulado-ia')?.addEventListener('click', () => _abrirModalGerarSimulado(questoesIA));
+}
+
+/* ============================================================
+   GERADOR DE SIMULADO PERSONALIZADO
+   Fluxo: filtros (modal) → simulado questão a questão →
+   resultado com revisão → salvar no histórico de simulados.
+   ============================================================ */
+
+// Estado em memória do simulado em andamento (null = nenhum ativo).
+let _simuladoGerado = null;
+
+function _abrirModalGerarSimulado(todasQuestoes) {
+  const disciplinas = [...new Set(todasQuestoes.map(t => t.disciplina).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const bancas     = [...new Set(todasQuestoes.map(t => t.banca).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const concursos  = [...new Set(todasQuestoes.map(t => t.concurso).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const qtdMax = todasQuestoes.length;
+  const hoje = new Date().toLocaleDateString('pt-BR');
+
+  openModal(`
+    <h2>🎯 Gerar Simulado Personalizado</h2>
+    <form id="form-gerar-simulado">
+      <div class="form-row">
+        <label>Nome do simulado</label>
+        <input type="text" name="nome" value="Simulado ${hoje}" placeholder="Ex: Revisão Direito Constitucional">
+      </div>
+
+      ${disciplinas.length > 1 ? `
+      <div class="form-row">
+        <label>Disciplinas <span style="font-weight:normal;color:var(--text-muted)">(desmarcadas = todas)</span></label>
+        <div style="max-height:130px;overflow-y:auto;padding:8px;background:var(--surface-2);border-radius:6px;display:flex;flex-direction:column;gap:5px;">
+          ${disciplinas.map(d => `<label style="display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer;">
+            <input type="checkbox" name="disciplina" value="${escapeHtml(d)}"> ${escapeHtml(d)}
+          </label>`).join('')}
+        </div>
+      </div>` : ''}
+
+      ${bancas.length > 1 ? `
+      <div class="form-row">
+        <label>Bancas <span style="font-weight:normal;color:var(--text-muted)">(desmarcadas = todas)</span></label>
+        <div style="padding:8px;background:var(--surface-2);border-radius:6px;display:flex;flex-wrap:wrap;gap:4px 12px;">
+          ${bancas.map(b => `<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+            <input type="checkbox" name="banca" value="${escapeHtml(b)}"> ${escapeHtml(b)}
+          </label>`).join('')}
+        </div>
+      </div>` : ''}
+
+      ${concursos.length > 1 ? `
+      <div class="form-row">
+        <label>Concursos <span style="font-weight:normal;color:var(--text-muted)">(desmarcados = todos)</span></label>
+        <div style="max-height:100px;overflow-y:auto;padding:8px;background:var(--surface-2);border-radius:6px;display:flex;flex-wrap:wrap;gap:4px 12px;">
+          ${concursos.map(c => `<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+            <input type="checkbox" name="concurso" value="${escapeHtml(c)}"> ${escapeHtml(c)}
+          </label>`).join('')}
+        </div>
+      </div>` : ''}
+
+      <div class="form-grid-2">
+        <div class="form-row">
+          <label>Filtrar por resultado anterior</label>
+          <select name="filtroResultado">
+            <option value="todas">Todas as questões</option>
+            <option value="errada">Só as que errei</option>
+            <option value="certa">Só as que acertei</option>
+            <option value="branco">Só as em branco</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Quantidade máxima</label>
+          <input type="number" name="quantidade" min="1" max="${qtdMax}" value="${Math.min(20, qtdMax)}">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label>Ordenação</label>
+        <select name="ordem">
+          <option value="aleatorio">Aleatória (embaralhada)</option>
+          <option value="erros">Priorizar erros primeiro</option>
+          <option value="recente">Mais recentes primeiro</option>
+          <option value="antigo">Mais antigas primeiro</option>
+        </select>
+      </div>
+
+      <div id="gerar-sim-preview" style="font-size:13px;padding:6px 0;"></div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="btn-cancelar-gerar-sim">Cancelar</button>
+        <button type="submit" class="btn btn-primary" id="btn-confirmar-gerar-sim">Iniciar Simulado →</button>
+      </div>
+    </form>
+  `);
+
+  $('#btn-cancelar-gerar-sim').addEventListener('click', closeModal);
+
+  function _filtrarQuestoes() {
+    const form = $('#form-gerar-simulado');
+    if (!form) return [];
+    const discSel    = [...form.querySelectorAll('[name=disciplina]:checked')].map(el => el.value);
+    const bancaSel   = [...form.querySelectorAll('[name=banca]:checked')].map(el => el.value);
+    const concSel    = [...form.querySelectorAll('[name=concurso]:checked')].map(el => el.value);
+    const filtroRes  = form.elements.filtroResultado?.value || 'todas';
+    let lista = todasQuestoes;
+    if (discSel.length)  lista = lista.filter(t => discSel.includes(t.disciplina));
+    if (bancaSel.length) lista = lista.filter(t => bancaSel.includes(t.banca));
+    if (concSel.length)  lista = lista.filter(t => concSel.includes(t.concurso));
+    if (filtroRes !== 'todas') lista = lista.filter(t => t.resultado === filtroRes);
+    return lista;
+  }
+
+  function _atualizarPreview() {
+    const form = $('#form-gerar-simulado');
+    const preview = $('#gerar-sim-preview');
+    const btnOk   = $('#btn-confirmar-gerar-sim');
+    if (!form || !preview || !btnOk) return;
+    const lista = _filtrarQuestoes();
+    const qtd   = Math.min(Number(form.elements.quantidade?.value) || 20, lista.length);
+    if (lista.length) {
+      preview.innerHTML = `<span style="color:var(--success)">✓</span> <b>${lista.length}</b> questões correspondem — serão usadas <b>${qtd}</b>`;
+      btnOk.disabled = false;
+    } else {
+      preview.innerHTML = `<span style="color:var(--danger)">⚠ Nenhuma questão corresponde aos filtros. Ajuste as seleções.</span>`;
+      btnOk.disabled = true;
+    }
+  }
+
+  $('#form-gerar-simulado').querySelectorAll('input, select').forEach(el => el.addEventListener('change', _atualizarPreview));
+  _atualizarPreview();
+
+  $('#form-gerar-simulado').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const form    = e.target;
+    const nome    = form.elements.nome?.value.trim() || 'Simulado Personalizado';
+    const ordem   = form.elements.ordem?.value || 'aleatorio';
+    const qtd     = Number(form.elements.quantidade?.value) || 20;
+    let questoes  = _filtrarQuestoes();
+
+    if (ordem === 'aleatorio') {
+      questoes = [...questoes].sort(() => Math.random() - 0.5);
+    } else if (ordem === 'erros') {
+      questoes = [...questoes].sort((a, b) => {
+        const rank = v => v === 'errada' ? 0 : v === 'branco' ? 1 : 2;
+        return rank(a.resultado) - rank(b.resultado);
+      });
+    } else if (ordem === 'recente') {
+      questoes = [...questoes].sort((a, b) => (b.data || '').localeCompare(a.data || '') || (b.id - a.id));
+    } else if (ordem === 'antigo') {
+      questoes = [...questoes].sort((a, b) => (a.data || '').localeCompare(b.data || '') || (a.id - b.id));
+    }
+
+    questoes = questoes.slice(0, qtd);
+
+    _simuladoGerado = {
+      nome,
+      questoes,
+      questaoAtual: 0,
+      respostas: {},
+      gabaritosRevelados: new Set(),
+      marcacoes: {},
+      finalizado: false,
+      inicio: new Date().toISOString(),
+      fim: null
+    };
+
+    closeModal();
+    location.hash = '#/simulado-gerado';
+  });
+}
+
+function renderSimuladoGerado(view) {
+  if (!_simuladoGerado) {
+    view.innerHTML = `
+      <div class="empty-state">
+        <p>Nenhum simulado ativo no momento.</p>
+        <a href="#/simulados" class="btn btn-primary">← Ir para Simulados</a>
+      </div>`;
+    return;
+  }
+  if (_simuladoGerado.finalizado) { _renderResultadoSimuladoGerado(view); return; }
+
+  const sg    = _simuladoGerado;
+  const idx   = sg.questaoAtual;
+  const total = sg.questoes.length;
+  const q     = sg.questoes[idx];
+  const gabRevelado = sg.gabaritosRevelados.has(q.id);
+  const respondidas = Object.keys(sg.respostas).length;
+  const resumo = state.resumos.find(r => r.tentativaId === q.id);
+  const pctBarra = Math.round((idx / total) * 100);
+
+  view.innerHTML = `
+    <!-- cabeçalho / progresso -->
+    <div class="card mb-12" style="padding:12px 16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+        <div>
+          <span style="font-size:13px;color:var(--text-muted);">Questão </span>
+          <b style="font-size:22px;">${idx + 1}</b>
+          <span style="font-size:13px;color:var(--text-muted);"> / ${total}</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span style="font-size:12px;color:var(--text-muted);">${respondidas} respondida${respondidas !== 1 ? 's' : ''}</span>
+          <button class="btn btn-ghost btn-sm" id="btn-abandonar-sim">Abandonar</button>
+        </div>
+      </div>
+      <div style="height:6px;background:var(--surface-2);border-radius:3px;overflow:hidden;">
+        <div style="height:100%;width:${pctBarra}%;background:var(--primary);border-radius:3px;transition:width .3s;"></div>
+      </div>
+    </div>
+
+    <!-- enunciado -->
+    <div class="card mb-12">
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
+        <b style="font-size:13.5px;">${escapeHtml(q.disciplina || '(Sem disciplina)')}</b>
+        ${q.assunto   ? `<span style="color:var(--text-muted);font-size:12px;">· ${escapeHtml(q.assunto)}</span>` : ''}
+        ${q.banca     ? `<span style="font-size:11px;background:var(--surface-2);padding:2px 8px;border-radius:4px;">${escapeHtml(q.banca)}</span>` : ''}
+        ${q.concurso  ? `<span style="font-size:11px;background:var(--surface-2);padding:2px 8px;border-radius:4px;">${escapeHtml(q.concurso)}</span>` : ''}
+        <span style="font-size:11px;color:var(--text-muted);">${toBRDate(q.data)}</span>
+      </div>
+      <div style="white-space:pre-wrap;font-size:14px;line-height:1.75;color:var(--text);padding:14px;background:var(--surface-2);border-radius:8px;">${escapeHtml(q.enunciado || '')}</div>
+    </div>
+
+    <!-- resposta + navegação -->
+    <div class="card mb-12">
+      <div class="form-row" style="margin-bottom:14px;">
+        <label>Sua resposta</label>
+        <input type="text" id="sim-resposta" autocomplete="off"
+          value="${escapeHtml(sg.respostas[q.id] || '')}"
+          placeholder="Ex: C  •  Certo  •  Errado"
+          style="text-transform:uppercase;max-width:260px;">
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        ${!gabRevelado ? `<button class="btn btn-sm" id="btn-revelar-gab">🔍 Ver gabarito e comentário</button>` : ''}
+        <div style="flex:1;"></div>
+        ${idx > 0 ? `<button class="btn btn-ghost btn-sm" id="btn-anterior-sim">← Anterior</button>` : ''}
+        ${idx < total - 1
+          ? `<button class="btn btn-primary btn-sm" id="btn-proxima-sim">Próxima →</button>`
+          : `<button class="btn btn-primary" id="btn-finalizar-sim">🏁 Ver Resultado</button>`}
+      </div>
+    </div>
+
+    <!-- gabarito + comentário da IA (visível após revelar) -->
+    ${gabRevelado ? `
+    <div class="card mb-12" style="border-left:3px solid var(--primary);">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+        <span style="font-size:13px;font-weight:600;">Gabarito:</span>
+        <span style="font-size:18px;font-weight:800;color:var(--primary);">${escapeHtml(q.gabaritoConfirmado || '(não registrado)')}</span>
+        ${q.resultado ? `<span class="badge ${q.resultado === 'certa' ? 'success' : q.resultado === 'errada' ? 'danger' : 'muted'}" style="font-size:11px;">
+          ${q.resultado === 'certa' ? '✅ você acertou da 1ª vez' : q.resultado === 'errada' ? '❌ você errou da 1ª vez' : '⬜ deixou em branco da 1ª vez'}
+        </span>` : ''}
+      </div>
+      <div style="margin-bottom:12px;">
+        <span style="font-size:12px;color:var(--text-muted);">Neste simulado:</span>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+          <button class="btn btn-sm ${sg.marcacoes[q.id] === 'certa'  ? 'btn-primary' : ''}" data-marcar="certa">✅ Acertei</button>
+          <button class="btn btn-sm ${sg.marcacoes[q.id] === 'errada' ? 'btn-primary' : ''}" data-marcar="errada">❌ Errei</button>
+          <button class="btn btn-sm ${sg.marcacoes[q.id] === 'branco' ? 'btn-primary' : ''}" data-marcar="branco">⬜ Em branco</button>
+        </div>
+      </div>
+      ${resumo ? `
+        <div style="border-top:1px solid var(--border);padding-top:12px;">
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;">💡 Comentário da IA</div>
+          <div style="line-height:1.65;font-size:13px;">${_mdParaHtml(resumo.textoBruto)}</div>
+          ${resumo.textoCondensado ? `<div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:12px;margin-top:10px;">📎 ${escapeHtml(resumo.textoCondensado)}</div>` : ''}
+        </div>
+      ` : ''}
+    </div>` : ''}
+
+    <!-- mini-mapa de questões -->
+    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">
+      ${sg.questoes.map((qt, i) => {
+        const m = sg.marcacoes[qt.id];
+        const bg = m === 'certa' ? 'var(--success)' : m === 'errada' ? 'var(--danger)' : sg.gabaritosRevelados.has(qt.id) ? 'var(--gold)' : 'var(--surface-2)';
+        const cor = m ? '#fff' : 'var(--text)';
+        const borda = i === idx ? '2px solid var(--primary)' : '2px solid transparent';
+        return `<button class="btn btn-sm sim-mini" data-i="${i}" style="min-width:34px;background:${bg};color:${cor};border:${borda};padding:4px 6px;">${i + 1}</button>`;
+      }).join('')}
+    </div>
+  `;
+
+  // — listeners —
+  $('#sim-resposta')?.addEventListener('input', e => { sg.respostas[q.id] = e.target.value.trim().toUpperCase(); });
+
+  $('#btn-revelar-gab')?.addEventListener('click', () => { sg.gabaritosRevelados.add(q.id); renderSimuladoGerado(view); });
+
+  $('#btn-anterior-sim')?.addEventListener('click', () => { sg.questaoAtual = idx - 1; renderSimuladoGerado(view); window.scrollTo(0,0); });
+  $('#btn-proxima-sim')?.addEventListener('click',  () => { sg.questaoAtual = idx + 1; renderSimuladoGerado(view); window.scrollTo(0,0); });
+
+  $('#btn-finalizar-sim')?.addEventListener('click', () => {
+    sg.finalizado = true;
+    sg.fim = new Date().toISOString();
+    renderSimuladoGerado(view);
+    window.scrollTo(0, 0);
+  });
+
+  $('#btn-abandonar-sim')?.addEventListener('click', () => {
+    if (!confirm('Abandonar o simulado? O progresso atual será perdido.')) return;
+    _simuladoGerado = null;
+    location.hash = '#/simulados';
+  });
+
+  $$('[data-marcar]', view).forEach(btn => btn.addEventListener('click', () => {
+    sg.marcacoes[q.id] = btn.dataset.marcar;
+    renderSimuladoGerado(view);
   }));
+
+  $$('.sim-mini', view).forEach(btn => btn.addEventListener('click', () => {
+    sg.questaoAtual = Number(btn.dataset.i);
+    renderSimuladoGerado(view);
+    window.scrollTo(0, 0);
+  }));
+}
+
+function _renderResultadoSimuladoGerado(view) {
+  const sg     = _simuladoGerado;
+  const total  = sg.questoes.length;
+  const certas  = sg.questoes.filter(q => sg.marcacoes[q.id] === 'certa').length;
+  const erradas = sg.questoes.filter(q => sg.marcacoes[q.id] === 'errada').length;
+  const brancos = sg.questoes.filter(q => sg.marcacoes[q.id] === 'branco').length;
+  const naoAval = total - certas - erradas - brancos;
+  const pct     = total ? ((certas / total) * 100).toFixed(1) : 0;
+  const tempoMs = sg.fim && sg.inicio ? new Date(sg.fim) - new Date(sg.inicio) : 0;
+  const tempoMin = Math.round(tempoMs / 60000);
+
+  view.innerHTML = `
+    <!-- placar -->
+    <div class="card mb-12" style="text-align:center;padding:28px 16px;">
+      <div style="font-size:14px;color:var(--text-muted);margin-bottom:6px;">${escapeHtml(sg.nome)}</div>
+      <div style="font-size:56px;font-weight:900;color:var(--primary);line-height:1;">${pct}%</div>
+      <div style="font-size:14px;color:var(--text-muted);margin-top:4px;">${certas} de ${total} questões corretas</div>
+      ${tempoMin > 0 ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">⏱ Tempo total: ${tempoMin} min</div>` : ''}
+    </div>
+
+    <div class="stat-grid mb-12">
+      <div class="stat-card success"><div class="label">Acertei</div><div class="value">${certas}</div></div>
+      <div class="stat-card danger"><div class="label">Errei</div><div class="value">${erradas}</div></div>
+      <div class="stat-card"><div class="label">Em branco</div><div class="value">${brancos}</div></div>
+      ${naoAval ? `<div class="stat-card muted"><div class="label">Não avaliadas</div><div class="value">${naoAval}</div></div>` : ''}
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;">
+      <button class="btn btn-primary" id="btn-salvar-sim-gerado">💾 Salvar no histórico</button>
+      <button class="btn btn-ghost"   id="btn-rever-sim">📋 Revisar questões</button>
+      <a href="#/simulados" class="btn btn-ghost">← Simulados</a>
+    </div>
+
+    <!-- revisão colapsável -->
+    <div id="revisao-sim" style="display:none;">
+      ${sg.questoes.map((q, i) => {
+        const m = sg.marcacoes[q.id];
+        const mc = m === 'certa' ? 'success' : m === 'errada' ? 'danger' : 'muted';
+        const ml = m === 'certa' ? 'Acertei' : m === 'errada' ? 'Errei' : m === 'branco' ? 'Em branco' : 'Não avaliada';
+        const resumo = state.resumos.find(r => r.tentativaId === q.id);
+        return `
+          <div class="card mb-12">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+              <div>
+                <span style="font-size:12px;color:var(--text-muted);">Q${i+1} · </span>
+                <b style="font-size:13px;">${escapeHtml(q.disciplina || '')}</b>
+                ${q.assunto ? `<span style="font-size:12px;color:var(--text-muted);"> · ${escapeHtml(q.assunto)}</span>` : ''}
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                <span class="badge ${mc}">${ml}</span>
+                ${q.gabaritoConfirmado ? `<span style="font-size:12px;background:var(--surface-2);padding:2px 8px;border-radius:4px;">Gabarito: <b>${escapeHtml(q.gabaritoConfirmado)}</b></span>` : ''}
+                ${sg.respostas[q.id] ? `<span style="font-size:12px;color:var(--text-muted);">Sua resp.: <b>${escapeHtml(sg.respostas[q.id])}</b></span>` : ''}
+              </div>
+            </div>
+            <details>
+              <summary style="cursor:pointer;font-size:13px;color:var(--primary);user-select:none;">Ver enunciado</summary>
+              <div style="white-space:pre-wrap;font-size:13px;line-height:1.65;padding:10px;background:var(--surface-2);border-radius:6px;margin-top:6px;">${escapeHtml(q.enunciado || '')}</div>
+            </details>
+            ${resumo ? `
+              <details style="margin-top:6px;">
+                <summary style="cursor:pointer;font-size:13px;color:var(--text-muted);user-select:none;">Ver comentário da IA</summary>
+                <div style="line-height:1.65;font-size:13px;padding-top:8px;">${_mdParaHtml(resumo.textoBruto)}</div>
+              </details>` : ''}
+          </div>`;
+      }).join('')}
+    </div>
+  `;
+
+  $('#btn-salvar-sim-gerado')?.addEventListener('click', async () => {
+    const btn = $('#btn-salvar-sim-gerado');
+    btn.disabled = true;
+    btn.textContent = 'Salvando…';
+    await db.simulados.add({
+      nome: sg.nome,
+      data: sg.inicio.slice(0, 10),
+      numQuestoes: total,
+      acertos: certas,
+      erros: erradas,
+      tempo: tempoMs ? Math.round(tempoMs / 1000) : 0,
+      origem: 'gerado'
+    });
+    await reloadState();
+    btn.textContent = '✓ Salvo!';
+    showToast('Simulado salvo no histórico.', 'success');
+  });
+
+  $('#btn-rever-sim')?.addEventListener('click', () => {
+    const el = $('#revisao-sim');
+    if (!el) return;
+    const visible = el.style.display !== 'none';
+    el.style.display = visible ? 'none' : 'block';
+    $('#btn-rever-sim').textContent = visible ? '📋 Revisar questões' : '▲ Ocultar revisão';
+  });
 }
 
 function fmtTempo(totalSegundos) {
@@ -2012,6 +3298,12 @@ function renderConfiguracoes(view) {
         Antes de cada sincronização com a nuvem, uma cópia do estado anterior é guardada aqui.
         Restaurar aqui substitui os dados do perfil ativo pelos do backup escolhido.
       </p>
+      <div class="flex" style="gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+        <button class="btn btn-sm" id="btn-buscar-todos-backups-nuvem">🔎 Buscar todos os backups (não só os mais recentes)</button>
+        <label class="flex" style="gap:6px;font-size:13px;color:var(--text-muted);cursor:pointer;">
+          <input type="checkbox" id="chk-so-com-ciclo"> Mostrar só os que têm ciclo(s)
+        </label>
+      </div>
       <div id="lista-backups-nuvem">Carregando...</div>
     </div>
 
@@ -2245,6 +3537,8 @@ async function renderListaBackupsLocais() {
   });
 }
 
+let _backupsNuvemCache = null; // guarda a última lista buscada, pra filtrar sem rebuscar
+
 async function renderListaBackupsNuvem() {
   const card = $('#card-backups-nuvem');
   const container = $('#lista-backups-nuvem');
@@ -2252,28 +3546,56 @@ async function renderListaBackupsNuvem() {
   if (typeof cloudSync === 'undefined' || !cloudSync.usuarioAtual) return;
 
   card.style.display = '';
-  try {
-    const backups = await cloudSync.listarBackupsNuvem();
+
+  const btnBuscarTudo = $('#btn-buscar-todos-backups-nuvem');
+  const chkSoComCiclo = $('#chk-so-com-ciclo');
+
+  async function carregar(limite) {
+    try {
+      container.innerHTML = 'Carregando...';
+      _backupsNuvemCache = await cloudSync.listarBackupsNuvem(limite);
+      desenhar();
+    } catch (err) {
+      container.innerHTML = '<p class="text-muted" style="font-size:13.5px;">Não foi possível carregar os backups da nuvem agora.</p>';
+    }
+  }
+
+  function desenhar() {
+    let backups = _backupsNuvemCache || [];
     if (!backups.length) {
       container.innerHTML = '<p class="text-muted" style="font-size:13.5px;">Nenhum backup na nuvem ainda.</p>';
       return;
     }
 
-    container.innerHTML = backups.map(b => {
-      const totalTentativas = (b.dados?.tentativas || []).length;
-      const totalCiclos = (b.dados?.ciclos || []).length;
-      const motivo = _MOTIVO_BACKUP_LABEL[b.motivo] || b.motivo || 'Automático';
-      const criadoEm = b.criadoEm && b.criadoEm.toDate ? b.criadoEm.toDate().toISOString() : b.criadoEm;
-      return `
-        <div class="flex" style="justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:12px;flex-wrap:wrap;">
-          <div>
-            <div style="font-weight:600;">${_formatarDataHoraBR(criadoEm)}</div>
-            <div class="text-muted" style="font-size:12.5px;">${escapeHtml(motivo)} — ${totalTentativas} tentativa(s), ${totalCiclos} ciclo(s) (perfil ativo)</div>
+    const soComCiclo = chkSoComCiclo?.checked;
+    const listaExibida = soComCiclo
+      ? backups.filter(b => ((b.dados?.ciclos || []).length > 0))
+      : backups;
+
+    if (!listaExibida.length) {
+      container.innerHTML = `<p class="text-muted" style="font-size:13.5px;">Nenhum desses ${backups.length} backup(s) carregado(s) tem ciclo salvo. Tente "Buscar todos" primeiro, se ainda não buscou.</p>`;
+      return;
+    }
+
+    container.innerHTML = `
+      <p class="text-muted" style="font-size:12px;margin:0 0 10px;">${backups.length} backup(s) carregado(s)${soComCiclo ? `, ${listaExibida.length} com ciclo` : ''}.</p>
+      ${listaExibida.map(b => {
+        const totalTentativas = (b.dados?.tentativas || []).length;
+        const totalCiclos = (b.dados?.ciclos || []).length;
+        const temCiclo = totalCiclos > 0;
+        const motivo = _MOTIVO_BACKUP_LABEL[b.motivo] || b.motivo || 'Automático';
+        const criadoEm = b.criadoEm && b.criadoEm.toDate ? b.criadoEm.toDate().toISOString() : b.criadoEm;
+        return `
+          <div class="flex" style="justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:12px;flex-wrap:wrap;${temCiclo ? 'background:var(--success-soft);border-radius:8px;padding-left:8px;padding-right:8px;' : ''}">
+            <div>
+              <div style="font-weight:600;">${_formatarDataHoraBR(criadoEm)} ${temCiclo ? '<span class="badge success">tem ciclo</span>' : ''}</div>
+              <div class="text-muted" style="font-size:12.5px;">${escapeHtml(motivo)} — ${totalTentativas} tentativa(s), ${totalCiclos} ciclo(s) (perfil ativo)</div>
+            </div>
+            <button class="btn" data-restaurar-nuvem="${b.id}">Restaurar</button>
           </div>
-          <button class="btn" data-restaurar-nuvem="${b.id}">Restaurar</button>
-        </div>
-      `;
-    }).join('');
+        `;
+      }).join('')}
+    `;
 
     container.querySelectorAll('[data-restaurar-nuvem]').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -2289,9 +3611,19 @@ async function renderListaBackupsNuvem() {
         }
       });
     });
-  } catch (err) {
-    container.innerHTML = '<p class="text-muted" style="font-size:13.5px;">Não foi possível carregar os backups da nuvem agora.</p>';
   }
+
+  btnBuscarTudo?.addEventListener('click', () => {
+    btnBuscarTudo.disabled = true;
+    btnBuscarTudo.textContent = 'Buscando...';
+    carregar(500).finally(() => {
+      btnBuscarTudo.disabled = false;
+      btnBuscarTudo.textContent = '🔎 Buscar todos os backups (não só os mais recentes)';
+    });
+  });
+  chkSoComCiclo?.addEventListener('change', desenhar);
+
+  await carregar(20);
 }
 
 /* ============================================================
