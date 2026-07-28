@@ -2245,6 +2245,7 @@ function _pararTimerCiclo() {
 
 function renderResolverIA(view) {
   view.innerHTML = `
+    ${renderRelogioCicloAtivo()}
     <div class="card mb-12">
       <div class="card-title" style="margin-bottom:12px;">Matéria da questão</div>
       <div class="form-grid-2">
@@ -2712,6 +2713,7 @@ function renderCaderno(view) {
   }
 
   view.innerHTML = `
+    ${renderRelogioCicloAtivo()}
     <div class="caderno-layout">
       <div class="caderno-sidebar" id="caderno-sidebar"></div>
       <div class="caderno-main" id="caderno-main"></div>
@@ -3257,6 +3259,7 @@ function renderAssuntoDetalhe(view, nomeAssunto) {
 
 function renderEditais(view) {
   view.innerHTML = `
+    ${renderRelogioCicloAtivo()}
     <div class="toolbar">
       <div class="text-muted">Importe o edital automaticamente e acompanhe o progresso por disciplina e tópico.</div>
       <a class="btn btn-primary" href="#/editais/importar">
@@ -3313,6 +3316,7 @@ function renderSimulados(view) {
   );
 
   view.innerHTML = `
+    ${renderRelogioCicloAtivo()}
     <div class="toolbar">
       <div class="text-muted">Registre seus simulados e acompanhe a evolução do aproveitamento.</div>
       <button class="btn btn-primary" id="btn-novo-simulado">
