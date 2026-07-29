@@ -835,80 +835,66 @@ function _cancelarSessaoCiclo(view, cicloId) {
   renderCicloPainelRoute(view, cicloId);
 }
 
+
 /* ============================================================
-   WIDGET FLUTUANTE DO CICLO — aparece em qualquer aba
+   WIDGET DO CICLO NA TOPBAR — aparece em qualquer aba
    ============================================================ */
 
 let _flutuanteTimerInterval = null;
 
 /**
- * Monta (ou desmonta) o widget flutuante no #ciclo-flutuante-root.
- * Deve ser chamado a cada navegação (router) e a cada mudança de estado
- * da sessão ativa. Quando não há sessão, limpa o root e para o timer.
+ * Atualiza a pill do Ciclo de Estudos na topbar.
+ * Chamado a cada navegação (router) e a cada mudança de estado da sessão.
+ * Quando não há sessão ativa, esconde o widget e para o timer.
  */
 function _atualizarCicloFlutuante() {
-  const root = document.getElementById('ciclo-flutuante-root');
-  if (!root) return;
+  const widget = document.getElementById('ciclo-topbar-widget');
+  if (!widget) return;
 
   const sessaoAtiva = settings.cicloSessaoAtiva;
 
-  // Se não há sessão OU estamos na própria tela do ciclo (onde o card
-  // completo já aparece), o widget flutuante fica oculto.
-  const rotaAtual = location.hash.replace(/^#\//, '') || 'dashboard';
-  const estaNoCiclo = rotaAtual.startsWith('ciclo');
-
-  if (!sessaoAtiva || estaNoCiclo) {
-    root.innerHTML = '';
+  if (!sessaoAtiva) {
+    widget.style.display = 'none';
     clearInterval(_flutuanteTimerInterval);
     _flutuanteTimerInterval = null;
     return;
   }
 
-  const materia = state.cicloMaterias.find(m => m.id === sessaoAtiva.materiaId);
-  const ciclo   = materia ? state.ciclos.find(c => c.id === materia.cicloId) : null;
-  const pausado = !!sessaoAtiva.pausadoEm;
+  const materia     = state.cicloMaterias.find(m => m.id === sessaoAtiva.materiaId);
+  const ciclo       = materia ? state.ciclos.find(c => c.id === materia.cicloId) : null;
+  const pausado     = !!sessaoAtiva.pausadoEm;
   const nomeMateria = materia ? materia.nome : 'Ciclo de Estudos';
   const rotaCiclo   = ciclo   ? `#/ciclo/${ciclo.id}` : '#/ciclo';
 
-  root.innerHTML = `
-    <div class="ciclo-flutuante" id="ciclo-flutuante">
-      <div class="ciclo-flutuante-header">
-        <span class="ciclo-flutuante-label">${pausado ? '⏸ Pausado' : '▶ Estudando'}</span>
-        <a href="${rotaCiclo}" class="ciclo-flutuante-materia" title="Ir para o Ciclo de Estudos">${escapeHtml(nomeMateria)}</a>
-      </div>
-      <div class="ciclo-flutuante-relogio${pausado ? ' pausado' : ''}" id="ciclo-flutuante-relogio">00:00</div>
-      ${pausado ? '<div class="ciclo-flutuante-pausado-label">em pausa</div>' : ''}
-      <div class="ciclo-flutuante-acoes">
-        ${pausado
-          ? `<button class="btn btn-primary" id="cflt-retomar">Retomar</button>`
-          : `<button class="btn"            id="cflt-pausar" >Pausar</button>`
-        }
-        <button class="btn btn-primary" id="cflt-concluir">Concluir</button>
-        <button class="btn btn-ghost"   id="cflt-cancelar">✕</button>
-      </div>
-    </div>
-  `;
+  // Mostra o widget e atualiza estado visual de pausa
+  widget.style.display = 'flex';
+  widget.classList.toggle('pausado', pausado);
 
-  // Cronômetro do widget
-  _iniciarCronometroFlutuante();
+  // Nome clicável → navega para o painel do ciclo
+  const elNome = document.getElementById('ciclo-topbar-nome');
+  if (elNome) {
+    elNome.textContent = nomeMateria;
+    elNome.onclick = () => { location.hash = rotaCiclo; };
+  }
 
-  // Botões
-  const btnPausar   = document.getElementById('cflt-pausar');
-  const btnRetomar  = document.getElementById('cflt-retomar');
-  const btnConcluir = document.getElementById('cflt-concluir');
-  const btnCancelar = document.getElementById('cflt-cancelar');
+  // Alterna visibilidade dos botões pausar / retomar
+  const btnPausar  = document.getElementById('ciclo-topbar-pausar');
+  const btnRetomar = document.getElementById('ciclo-topbar-retomar');
+  if (btnPausar)  btnPausar.style.display  = pausado ? 'none' : '';
+  if (btnRetomar) btnRetomar.style.display = pausado ? ''     : 'none';
 
-  if (btnPausar) {
-    btnPausar.addEventListener('click', () => {
+  // Liga os listeners apenas uma vez (flag no próprio elemento)
+  if (!widget._listenersOk) {
+    widget._listenersOk = true;
+
+    document.getElementById('ciclo-topbar-pausar')?.addEventListener('click', () => {
       const sa = settings.cicloSessaoAtiva;
       if (!sa || sa.pausadoEm) return;
       settings.cicloSessaoAtiva = { ...sa, pausadoEm: Date.now() };
       _atualizarCicloFlutuante();
     });
-  }
 
-  if (btnRetomar) {
-    btnRetomar.addEventListener('click', () => {
+    document.getElementById('ciclo-topbar-retomar')?.addEventListener('click', () => {
       const sa = settings.cicloSessaoAtiva;
       if (!sa || !sa.pausadoEm) return;
       settings.cicloSessaoAtiva = {
@@ -918,10 +904,8 @@ function _atualizarCicloFlutuante() {
       };
       _atualizarCicloFlutuante();
     });
-  }
 
-  if (btnConcluir) {
-    btnConcluir.addEventListener('click', async () => {
+    document.getElementById('ciclo-topbar-concluir')?.addEventListener('click', async () => {
       const sa = settings.cicloSessaoAtiva;
       if (!sa) return;
       clearInterval(_flutuanteTimerInterval);
@@ -933,22 +917,23 @@ function _atualizarCicloFlutuante() {
         await db.cicloMaterias.update(mat);
         await db.cicloSessoes.add({
           cicloMateriaId: mat.id, nome: mat.nome, data: todayISO(),
-          minutos, inicio: new Date(sa.inicio).toISOString(), fim: new Date().toISOString(),
-          tipoEstudo: sa.tipoEstudo || null, topico: sa.topico || null
+          minutos,
+          inicio: new Date(sa.inicio).toISOString(),
+          fim:    new Date().toISOString(),
+          tipoEstudo: sa.tipoEstudo || null,
+          topico:     sa.topico     || null
         });
       }
       settings.cicloSessaoAtiva = null;
       await reloadState();
       showToast(`Sessão registrada: ${_formatarMinutos(minutos)}`, 'success');
       _atualizarCicloFlutuante();
-      // Se o usuário estava na tela do painel do ciclo, recarrega
+      // Se estiver no painel do ciclo, recarrega a tela para refletir o novo tempo
       const rotaAgora = location.hash.replace(/^#\//, '') || 'dashboard';
       if (rotaAgora.startsWith('ciclo') && typeof router === 'function') router();
     });
-  }
 
-  if (btnCancelar) {
-    btnCancelar.addEventListener('click', () => {
+    document.getElementById('ciclo-topbar-cancelar')?.addEventListener('click', () => {
       if (!confirm('Cancelar esta sessão sem salvar o tempo estudado?')) return;
       clearInterval(_flutuanteTimerInterval);
       _flutuanteTimerInterval = null;
@@ -956,15 +941,17 @@ function _atualizarCicloFlutuante() {
       _atualizarCicloFlutuante();
     });
   }
+
+  // Inicia (ou mantém) o cronômetro da topbar
+  _iniciarCronometroFlutuante();
 }
 
-/** Cronômetro exclusivo do widget flutuante — não interfere com o
- *  #ciclo-cronometro do painel principal (intervalos separados). */
+/** Cronômetro da topbar pill — intervalo separado do painel do ciclo. */
 function _iniciarCronometroFlutuante() {
   clearInterval(_flutuanteTimerInterval);
   function tick() {
-    const sa  = settings.cicloSessaoAtiva;
-    const el  = document.getElementById('ciclo-flutuante-relogio');
+    const sa = settings.cicloSessaoAtiva;
+    const el = document.getElementById('ciclo-topbar-relogio');
     if (!sa || !el) { clearInterval(_flutuanteTimerInterval); return; }
     const seg = Math.floor(_cicloElapsedMs(sa) / 1000);
     el.textContent = _formatarCronometro(seg);

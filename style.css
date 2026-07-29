@@ -829,102 +829,97 @@ mark{
 }
 
 /* ============================================================
-   WIDGET FLUTUANTE DO CICLO DE ESTUDOS
-   Aparece no canto inferior direito em QUALQUER aba quando
-   há uma sessão de cronômetro ativa.
+   WIDGET DO CICLO DE ESTUDOS NA TOPBAR
+   Pill compacta entre o título e o botão "Registrar tentativa"
    ============================================================ */
-#ciclo-flutuante-root:empty{ display:none; }
-
-.ciclo-flutuante{
-  position:fixed;
-  bottom:80px; right:20px;
-  z-index:150;
-  background:var(--surface);
-  border:1.5px solid var(--gold);
-  border-radius:var(--radius);
-  box-shadow:0 8px 32px rgba(0,0,0,.45);
-  padding:14px 16px 12px;
-  min-width:220px;
-  max-width:280px;
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-  animation: cicloFlutuanteIn .2s var(--ease);
-}
-@keyframes cicloFlutuanteIn{
-  from{ opacity:0; transform:translateY(12px) scale(.97); }
-  to  { opacity:1; transform:translateY(0)   scale(1);   }
-}
-
-.ciclo-flutuante-header{
+.ciclo-topbar-widget{
   display:flex;
   align-items:center;
-  justify-content:space-between;
   gap:8px;
+  background:var(--surface-2);
+  border:1.5px solid var(--gold);
+  border-radius:999px;
+  padding:5px 10px 5px 8px;
+  flex-shrink:0;
+  white-space:nowrap;
+  animation:cicloTopbarIn .2s var(--ease);
 }
-.ciclo-flutuante-label{
-  font-size:11px;
-  font-weight:700;
-  letter-spacing:.06em;
-  text-transform:uppercase;
-  color:var(--gold);
+@keyframes cicloTopbarIn{
+  from{ opacity:0; transform:scale(.95); }
+  to  { opacity:1; transform:scale(1);   }
 }
-.ciclo-flutuante-materia{
+
+/* bolinha pulsante verde/amarela de status */
+.ciclo-topbar-dot{
+  width:8px; height:8px; border-radius:50%;
+  background:var(--gold);
+  flex-shrink:0;
+  animation:cicloTopbarPulse 1.4s ease-in-out infinite;
+}
+.ciclo-topbar-widget.pausado .ciclo-topbar-dot{
+  background:var(--text-faint);
+  animation:none;
+}
+@keyframes cicloTopbarPulse{
+  0%,100%{ opacity:1; }
+  50%     { opacity:.4; }
+}
+
+.ciclo-topbar-nome{
   font-size:13px;
   font-weight:600;
   color:var(--text);
-  cursor:pointer;
-  text-decoration:none;
-  white-space:nowrap;
+  max-width:130px;
   overflow:hidden;
   text-overflow:ellipsis;
-  max-width:160px;
-  display:block;
+  cursor:pointer;
 }
-.ciclo-flutuante-materia:hover{ text-decoration:underline; color:var(--gold); }
+.ciclo-topbar-nome:hover{ color:var(--gold); }
 
-.ciclo-flutuante-relogio{
+.ciclo-topbar-relogio{
   font-family:var(--font-mono);
-  font-size:30px;
+  font-size:14px;
   font-weight:700;
   color:var(--gold);
+  letter-spacing:.5px;
+  min-width:42px;
   text-align:center;
-  letter-spacing:1px;
+}
+.ciclo-topbar-widget.pausado .ciclo-topbar-relogio{ color:var(--text-faint); }
+
+/* separador vertical */
+.ciclo-topbar-widget::before{
+  content:'';
+  display:block;
+  width:1px; height:20px;
+  background:var(--border);
+  flex-shrink:0;
+  order:-1;   /* fica antes de tudo — na verdade não: usamos order nos filhos */
+}
+/* na prática sem pseudo — usaremos um div .ciclo-topbar-sep */
+.ciclo-topbar-sep{
+  width:1px; height:18px; background:var(--border); flex-shrink:0;
+}
+
+.ciclo-topbar-btn{
+  background:transparent;
+  border:none;
+  cursor:pointer;
+  color:var(--text-muted);
+  font-size:14px;
+  padding:2px 4px;
+  border-radius:4px;
   line-height:1;
-  padding:2px 0;
+  transition:color .15s, background .15s;
+  flex-shrink:0;
 }
-.ciclo-flutuante-relogio.pausado{ color:var(--text-faint); }
+.ciclo-topbar-btn:hover{ color:var(--text); background:var(--surface-hover); }
+.ciclo-topbar-btn-ok{ color:var(--success); }
+.ciclo-topbar-btn-ok:hover{ color:var(--success); background:var(--success-soft); }
 
-.ciclo-flutuante-pausado-label{
-  text-align:center;
-  font-size:11px;
-  color:var(--text-faint);
-  font-weight:600;
-  letter-spacing:.05em;
-  text-transform:uppercase;
-  margin-top:-4px;
-}
-
-.ciclo-flutuante-acoes{
-  display:flex;
-  gap:6px;
-  flex-wrap:wrap;
-  justify-content:center;
-}
-.ciclo-flutuante-acoes .btn{
-  flex:1;
-  min-width:0;
-  padding:6px 8px;
-  font-size:12px;
-  justify-content:center;
-}
-
-/* Em telas muito pequenas, empurra para cima dos toasts */
-@media(max-width:480px){
-  .ciclo-flutuante{
-    bottom:70px;
-    right:10px;
-    left:10px;
-    max-width:none;
-  }
+/* Em mobile: esconde o nome pra não estourar a topbar */
+@media(max-width:600px){
+  .ciclo-topbar-nome{ display:none; }
+  .ciclo-topbar-sep { display:none; }
+  .ciclo-topbar-widget{ padding:5px 8px; gap:6px; }
 }
