@@ -2460,10 +2460,14 @@ function renderCaderno(view) {
       const id = Number(btn.dataset.ttsCard);
       const r = state.resumos.find(x => x.id === id);
       if (!r) return;
-      if (!window.tts?.suportado()) { showToast('Leitura em voz alta não disponível neste navegador.', 'danger'); return; }
+      // Checagem defensiva: funciona com tts-modulo novo (tem suportado()) e o original (não tem)
+      const ttsOk = window.tts && (
+        typeof window.tts.suportado === 'function' ? window.tts.suportado() : !!window.speechSynthesis
+      );
+      if (!ttsOk) { showToast('Leitura em voz alta não disponível neste navegador.', 'danger'); return; }
       const t = state.tentativas.find(x => x.id === r.tentativaId);
       const cabecalho = t ? `${t.disciplina}. ` : '';
-      tts.falar(cabecalho + (r.textoBruto || '').replace(/[#*=~`]/g, '').replace(/\n+/g, '. '));
+      window.tts.falar(cabecalho + (r.textoBruto || '').replace(/[#*=~`]/g, '').replace(/\n+/g, '. '));
       const status = $('#tts-status');
       if (status) status.textContent = '🔊 Lendo este card...';
     }));
@@ -2518,7 +2522,13 @@ function renderCaderno(view) {
   renderMain();
 
   // ── Painel TTS — controles do painel fixo ──────────────────────────────
-  const _tts = (window.tts && window.tts.suportado()) ? window.tts : null;
+  // Detecta suporte TTS de forma defensiva — funciona com qualquer versão
+  // do tts-modulo.js: se tiver suportado(), usa; se não tiver (versão
+  // antiga ainda no ar), verifica diretamente window.speechSynthesis.
+  const _ttsSuportado = window.tts && (
+    typeof window.tts.suportado === 'function' ? window.tts.suportado() : !!window.speechSynthesis
+  );
+  const _tts = _ttsSuportado ? window.tts : null;
   const atualizarEstadoTTS = (msg) => {
     const s = $('#tts-status'); if (s) s.textContent = msg;
     const play = $('#tts-btn-play'), pause = $('#tts-btn-pause');
