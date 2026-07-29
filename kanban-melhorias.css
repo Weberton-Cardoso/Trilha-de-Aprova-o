@@ -1,0 +1,156 @@
+/* ===== KANBAN MELHORIAS CSS ===== */
+/* Estilos complementares para o Kanban com edição inline, menus, e reordenação vertical */
+
+/* ===== MENU DE CARD ===== */
+.kanban-card-menu-btn {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.kanban-card-menu-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.kanban-card-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 180px;
+  z-index: 1000;
+  display: none;
+  flex-direction: column;
+  gap: 0;
+}
+.kanban-card-menu.active {
+  display: flex;
+}
+.kanban-card-menu button {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.kanban-card-menu button:first-child {
+  border-radius: 6px 6px 0 0;
+}
+.kanban-card-menu button:last-child {
+  border-radius: 0 0 6px 6px;
+}
+.kanban-card-menu button:hover {
+  background: var(--surface-hover);
+}
+.kanban-card-menu button.danger {
+  color: var(--danger);
+}
+.kanban-card-menu button.danger:hover {
+  background: rgba(255, 77, 77, 0.1);
+}
+
+/* ===== TÍTULO EDITÁVEL (duplo clique) ===== */
+.kanban-card-titulo {
+  flex: 1;
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: background 0.15s;
+}
+.kanban-card-titulo:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* ===== BOTÃO DE ADICIONAR TÓPICO ===== */
+.kanban-col-add-btn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.kanban-col-add-btn:hover {
+  background: var(--gold-soft);
+  color: var(--gold);
+}
+
+/* ===== DRAG-AND-DROP REORDENAÇÃO VERTICAL ===== */
+.kanban-card.dragging {
+  opacity: 0.5;
+}
+.kanban-card.drag-over-top::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--gold);
+  border-radius: 1px;
+  z-index: 10;
+}
+.kanban-card.drag-over-bottom::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--gold);
+  border-radius: 1px;
+  z-index: 10;
+}
+.kanban-col-body.drag-over {
+  background: rgba(232, 177, 77, 0.05);
+  border-radius: 4px;
+}
+
+/* ===== BADGE DE TEMPO DO CICLO ===== */
+.kb-badge-tempo {
+  background: var(--gold-soft);
+  color: var(--gold);
+  font-weight: 600;
+}
+
+/* ===== CARD COM POSITION RELATIVA PARA MENUS ===== */
+.kanban-card {
+  position: relative;
+}
+
+/* ===== RESPONSIVO ===== */
+@media (max-width: 640px) {
+  .kanban-card-titulo {
+    font-size: 13px;
+  }
+  .kanban-card-menu-btn,
+  .kanban-col-add-btn {
+    width: 24px;
+    height: 24px;
+  }
+}

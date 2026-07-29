@@ -2464,6 +2464,9 @@ function renderCaderno(view) {
 
   renderSidebar();
   renderMain();
+
+  // TTS: Leitor de Resumos
+  if (window.setupTTSCaderno) setupTTSCaderno(view);
 }
 
 /* ============================================================

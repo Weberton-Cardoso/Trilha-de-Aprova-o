@@ -767,6 +767,9 @@ function renderEditalDetalhe(view, idStr) {
             <h3>${escapeHtml(m.nome)}</h3>
             <div class="kanban-col-head-right">
               <span class="kanban-col-count">${m.topicos.length}</span>
+              <button class="kanban-col-add-btn" data-add-topico-mi="${mi}" title="Adicionar novo tópico">
+                <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
+              </button>
               <button class="kanban-col-menu-btn" data-menu-mi="${mi}" title="Opções da disciplina">
                 <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 8a2 2 0 100-4 2 2 0 000 4zm0 6a2 2 0 100-4 2 2 0 000 4zm0 6a2 2 0 100-4 2 2 0 000 4z"/></svg>
               </button>
@@ -790,6 +793,109 @@ function renderEditalDetalhe(view, idStr) {
         await db.editais.update(edital);
         await reloadState();
         desenharBoard();
+      });
+    });
+
+    // ===== EDIÇÃO INLINE DE TÍTULO =====
+    $$('.kanban-card-titulo', board).forEach(span => {
+      span.addEventListener('dblclick', async (e) => {
+        e.stopPropagation();
+        const mi = Number(span.dataset.mi), ti = Number(span.dataset.ti);
+        const topicoAtual = edital.materias[mi].topicos[ti].nome;
+        const novoNome = prompt('Editar nome do tópico:', topicoAtual);
+        if (novoNome && novoNome.trim() && novoNome.trim() !== topicoAtual) {
+          edital.materias[mi].topicos[ti].nome = novoNome.trim();
+          await db.editais.update(edital);
+          await reloadState();
+          desenharBoard();
+          showToast('Tópico renomeado.', 'success');
+        }
+      });
+    });
+
+    // ===== MENU DE CARD (Deletar, Editar Nome, Mover, Estudar) =====
+    $$('.kanban-card-menu-btn', board).forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const mi = Number(btn.dataset.menuCardMi), ti = Number(btn.dataset.menuCardTi);
+        const menu = $(`[data-menu-alvo-card="${mi}-${ti}"]`, board);
+        if (menu) menu.classList.toggle('active');
+      });
+    });
+
+    $$('[data-deletar-mi]', board).forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const mi = Number(btn.dataset.deletarMi), ti = Number(btn.dataset.deletarTi);
+        const nomeTopico = edital.materias[mi].topicos[ti].nome;
+        if (!confirm(`Deletar tópico "${nomeTopico}"? Esta ação não pode ser desfeita.`)) return;
+        edital.materias[mi].topicos.splice(ti, 1);
+        await db.editais.update(edital);
+        await reloadState();
+        desenharBoard();
+        showToast('Tópico deletado.', 'danger');
+      });
+    });
+
+    $$('[data-editar-nome-mi]', board).forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const mi = Number(btn.dataset.editarNomeMi), ti = Number(btn.dataset.editarNomeTi);
+        const topicoAtual = edital.materias[mi].topicos[ti].nome;
+        const novoNome = prompt('Novo nome:', topicoAtual);
+        if (novoNome && novoNome.trim() && novoNome.trim() !== topicoAtual) {
+          edital.materias[mi].topicos[ti].nome = novoNome.trim();
+          await db.editais.update(edital);
+          await reloadState();
+          desenharBoard();
+          showToast('Tópico renomeado.', 'success');
+        }
+      });
+    });
+
+    $$('[data-mover-para-cima-mi]', board).forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const mi = Number(btn.dataset.moverParaCimaMi), ti = Number(btn.dataset.moverParaCimaTi);
+        if (ti === 0) {
+          showToast('Já é o primeiro tópico desta disciplina.', 'info');
+          return;
+        }
+        const temp = edital.materias[mi].topicos[ti];
+        edital.materias[mi].topicos[ti] = edital.materias[mi].topicos[ti - 1];
+        edital.materias[mi].topicos[ti - 1] = temp;
+        await db.editais.update(edital);
+        await reloadState();
+        desenharBoard();
+      });
+    });
+
+    $$('[data-mover-para-baixo-mi]', board).forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const mi = Number(btn.dataset.moverParaBaixoMi), ti = Number(btn.dataset.moverParaBaixoTi);
+        if (ti === edital.materias[mi].topicos.length - 1) {
+          showToast('Já é o último tópico desta disciplina.', 'info');
+          return;
+        }
+        const temp = edital.materias[mi].topicos[ti];
+        edital.materias[mi].topicos[ti] = edital.materias[mi].topicos[ti + 1];
+        edital.materias[mi].topicos[ti + 1] = temp;
+        await db.editais.update(edital);
+        await reloadState();
+        desenharBoard();
+      });
+    });
+
+    $$('[data-estudar-mi]', board).forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const mi = Number(btn.dataset.estudarMi), ti = Number(btn.dataset.estudarTi);
+        const topico = edital.materias[mi].topicos[ti];
+        const disciplina = edital.materias[mi].nome;
+        showToast(`Iniciando sessão de estudo: ${disciplina} > ${topico.nome}`, 'success');
+        // Quando houver integração com Ciclo de Estudos, chamar a função pra iniciar sessão aqui
+        // Por enquanto, só notifica
       });
     });
 
@@ -852,18 +958,99 @@ function renderEditalDetalhe(view, idStr) {
       });
     });
 
+    // ===== CRIAR NOVO TÓPICO =====
+    $$('[data-add-topico-mi]', board).forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const mi = Number(btn.dataset.addTopicoMi);
+        const novoNome = prompt('Nome do novo tópico:');
+        if (!novoNome || !novoNome.trim()) return;
+        edital.materias[mi].topicos.push({
+          nome: novoNome.trim(),
+          status: 'nao_iniciado'
+        });
+        await db.editais.update(edital);
+        await reloadState();
+        desenharBoard();
+        showToast('Tópico criado.', 'success');
+      });
+    });
+
+    // ===== FECHAR MENUS DE CARD AO CLICAR FORA =====
+    document.addEventListener('click', () => $$('.kanban-card-menu', board).forEach(m => m.classList.remove('active')));
+
+    // ===== DRAG-AND-DROP COM REORDENAÇÃO VERTICAL =====
+    let dragSource = null;
     $$('.kanban-card', board).forEach(card => {
       card.addEventListener('dragstart', (e) => {
-        e.dataTransfer.setData('text/plain', JSON.stringify({ mi: Number(card.dataset.mi), ti: Number(card.dataset.ti) }));
+        dragSource = { mi: Number(card.dataset.mi), ti: Number(card.dataset.ti) };
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', JSON.stringify(dragSource));
         card.classList.add('dragging');
       });
-      card.addEventListener('dragend', () => card.classList.remove('dragging'));
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        dragSource = null;
+      });
+      card.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (dragSource && dragSource.mi === Number(card.dataset.mi)) {
+          // Reordenação vertical dentro da mesma coluna
+          const rect = card.getBoundingClientRect();
+          const meio = rect.top + rect.height / 2;
+          if (e.clientY < meio) {
+            card.classList.add('drag-over-top');
+            card.classList.remove('drag-over-bottom');
+          } else {
+            card.classList.remove('drag-over-top');
+            card.classList.add('drag-over-bottom');
+          }
+        }
+      });
+      card.addEventListener('dragleave', () => {
+        card.classList.remove('drag-over-top', 'drag-over-bottom');
+      });
+      card.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        card.classList.remove('drag-over-top', 'drag-over-bottom');
+        
+        if (!dragSource) return;
+        const destMi = Number(card.dataset.mi);
+        const destTi = Number(card.dataset.ti);
+        
+        if (dragSource.mi === destMi) {
+          // Reordenação vertical na mesma coluna
+          const topicos = edital.materias[destMi].topicos;
+          if (dragSource.ti !== destTi) {
+            const [moved] = topicos.splice(dragSource.ti, 1);
+            const novoIndice = dragSource.ti < destTi ? destTi - 1 : destTi;
+            topicos.splice(novoIndice, 0, moved);
+            await db.editais.update(edital);
+            await reloadState();
+            desenharBoard();
+          }
+        } else {
+          // Movimento entre colunas
+          const [topico] = edital.materias[dragSource.mi].topicos.splice(dragSource.ti, 1);
+          edital.materias[destMi].topicos.push(topico);
+          await db.editais.update(edital);
+          await reloadState();
+          desenharBoard();
+        }
+      });
     });
+
     $$('.kanban-col-body', board).forEach(colBody => {
-      colBody.addEventListener('dragover', (e) => { e.preventDefault(); colBody.classList.add('drag-over'); });
+      colBody.addEventListener('dragover', (e) => { 
+        e.preventDefault(); 
+        colBody.classList.add('drag-over'); 
+      });
       colBody.addEventListener('dragleave', () => colBody.classList.remove('drag-over'));
       colBody.addEventListener('drop', async (e) => {
         e.preventDefault();
+        e.stopPropagation();
         colBody.classList.remove('drag-over');
         const destMi = Number(colBody.dataset.dropMi);
         let payload;
@@ -882,13 +1069,22 @@ function renderEditalDetalhe(view, idStr) {
 function renderKanbanCard(t, mi, ti, stats) {
   const marcado = t.status === 'dominado';
   const pct = stats ? stats.taxa : 0;
+  
+  // Buscar conexão com Ciclo de Estudos (por nome normalizado)
+  const materiasCiclo = state.ciclos.flatMap(c => c.materias || []);
+  const materiaCiclo = materiasCiclo.find(m => _norm(m.nome) === _norm(edital.materias[mi]?.nome));
+  const tempoEstudado = materiaCiclo ? _formatarMinutos(materiaCiclo.minutosFeitos || 0) : '—';
+  
   return `
-    <div class="kanban-card status-${t.status}" draggable="true" data-mi="${mi}" data-ti="${ti}">
+    <div class="kanban-card status-${t.status}" draggable="true" data-mi="${mi}" data-ti="${ti}" data-ordem="${t.ordem || ti}">
       <div class="kanban-card-top">
         <button type="button" class="kanban-checkbox ${marcado ? 'checked' : ''}" data-check-mi="${mi}" data-check-ti="${ti}" title="${marcado ? 'Desmarcar como dominado' : 'Marcar como dominado'}">
           ${marcado ? '<svg viewBox="0 0 24 24" width="13" height="13"><path fill="#0B0F14" d="M9 16.2l-3.5-3.6L4 14.1l5 5.1L20 8.1l-1.5-1.5z"/></svg>' : ''}
         </button>
-        <span class="kanban-card-titulo">${escapeHtml(t.nome)}</span>
+        <span class="kanban-card-titulo" data-mi="${mi}" data-ti="${ti}" title="Clique duas vezes para editar">${escapeHtml(t.nome)}</span>
+        <button class="kanban-card-menu-btn" data-menu-card-mi="${mi}" data-menu-card-ti="${ti}" title="Opções do tópico">
+          <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M12 8a2 2 0 100-4 2 2 0 000 4zm0 6a2 2 0 100-4 2 2 0 000 4zm0 6a2 2 0 100-4 2 2 0 000 4z"/></svg>
+        </button>
       </div>
       <div class="kanban-card-badges">
         ${stats ? `<span class="kb-badge" title="Você já estudou este tópico"><svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11.5A4.5 4.5 0 1112 7.5a4.5 4.5 0 010 9zM12 10a2 2 0 100 4 2 2 0 000-4z"/></svg></span>` : ''}
@@ -897,6 +1093,7 @@ function renderKanbanCard(t, mi, ti, stats) {
         </span>
         ${stats ? `<span class="kb-badge" title="Tentativas registradas"><svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M4 4h16v12H7l-3 3V4z"/></svg> ${stats.tentativas}</span>` : ''}
         ${stats ? `<span class="kb-badge kb-badge-pct" title="Taxa de acertos">${fmtPct(pct)}</span>` : ''}
+        ${materiaCiclo ? `<span class="kb-badge kb-badge-tempo" title="Tempo estudado no Ciclo">⏱️ ${tempoEstudado}</span>` : ''}
       </div>
       <div class="kanban-card-detalhe" id="kb-detalhe-${mi}-${ti}" hidden>
         <select class="kanban-status-select" data-mi="${mi}" data-ti="${ti}">
@@ -910,6 +1107,13 @@ function renderKanbanCard(t, mi, ti, stats) {
           </div>
           <div class="kanban-card-foot">Última vez: ${toBRDate(stats.ultimaData)} ${stats.tendencia.icone}</div>
         ` : `<div class="kanban-card-stats"><span class="text-muted">Nenhuma tentativa registrada ainda</span></div>`}
+      </div>
+      <div class="kanban-card-menu" data-menu-alvo-card="${mi}-${ti}">
+        <button data-estudar-mi="${mi}" data-estudar-ti="${ti}">▶ Estudar este tópico</button>
+        <button data-editar-nome-mi="${mi}" data-editar-nome-ti="${ti}">✏️ Editar nome</button>
+        <button data-mover-para-cima-mi="${mi}" data-mover-para-cima-ti="${ti}">⬆️ Mover para cima</button>
+        <button data-mover-para-baixo-mi="${mi}" data-mover-para-baixo-ti="${ti}">⬇️ Mover para baixo</button>
+        <button class="danger" data-deletar-mi="${mi}" data-deletar-ti="${ti}">🗑️ Deletar tópico</button>
       </div>
     </div>
   `;
