@@ -454,6 +454,7 @@ async function router() {
   }
 
   updateStreakMini();
+  if (typeof _atualizarCicloFlutuante === 'function') _atualizarCicloFlutuante();
 }
 
 /* ============================================================

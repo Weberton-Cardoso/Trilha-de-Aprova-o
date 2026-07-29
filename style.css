@@ -827,3 +827,104 @@ mark{
 :root:not([data-theme]) mark{
   background: rgba(255, 214, 0, 0.55);
 }
+
+/* ============================================================
+   WIDGET FLUTUANTE DO CICLO DE ESTUDOS
+   Aparece no canto inferior direito em QUALQUER aba quando
+   há uma sessão de cronômetro ativa.
+   ============================================================ */
+#ciclo-flutuante-root:empty{ display:none; }
+
+.ciclo-flutuante{
+  position:fixed;
+  bottom:80px; right:20px;
+  z-index:150;
+  background:var(--surface);
+  border:1.5px solid var(--gold);
+  border-radius:var(--radius);
+  box-shadow:0 8px 32px rgba(0,0,0,.45);
+  padding:14px 16px 12px;
+  min-width:220px;
+  max-width:280px;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  animation: cicloFlutuanteIn .2s var(--ease);
+}
+@keyframes cicloFlutuanteIn{
+  from{ opacity:0; transform:translateY(12px) scale(.97); }
+  to  { opacity:1; transform:translateY(0)   scale(1);   }
+}
+
+.ciclo-flutuante-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+.ciclo-flutuante-label{
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  color:var(--gold);
+}
+.ciclo-flutuante-materia{
+  font-size:13px;
+  font-weight:600;
+  color:var(--text);
+  cursor:pointer;
+  text-decoration:none;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width:160px;
+  display:block;
+}
+.ciclo-flutuante-materia:hover{ text-decoration:underline; color:var(--gold); }
+
+.ciclo-flutuante-relogio{
+  font-family:var(--font-mono);
+  font-size:30px;
+  font-weight:700;
+  color:var(--gold);
+  text-align:center;
+  letter-spacing:1px;
+  line-height:1;
+  padding:2px 0;
+}
+.ciclo-flutuante-relogio.pausado{ color:var(--text-faint); }
+
+.ciclo-flutuante-pausado-label{
+  text-align:center;
+  font-size:11px;
+  color:var(--text-faint);
+  font-weight:600;
+  letter-spacing:.05em;
+  text-transform:uppercase;
+  margin-top:-4px;
+}
+
+.ciclo-flutuante-acoes{
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+  justify-content:center;
+}
+.ciclo-flutuante-acoes .btn{
+  flex:1;
+  min-width:0;
+  padding:6px 8px;
+  font-size:12px;
+  justify-content:center;
+}
+
+/* Em telas muito pequenas, empurra para cima dos toasts */
+@media(max-width:480px){
+  .ciclo-flutuante{
+    bottom:70px;
+    right:10px;
+    left:10px;
+    max-width:none;
+  }
+}
