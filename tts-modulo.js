@@ -1,193 +1,196 @@
 /**
- * Módulo TTS (Text-to-Speech)
- * Permite ler textos em voz alta usando Web Speech API
- * Suporta: pausa, resume, stop, velocidade, seleção de idioma
+ * tts-modulo.js
+ * Text-to-Speech usando Web Speech API com suporte a mobile (Chrome Android).
+ *
+ * Correções específicas pra mobile:
+ * - DOMContentLoaded não é confiável quando o script carrega no final do body;
+ *   a inicialização agora acontece imediatamente E no onvoiceschanged, que é o
+ *   único evento garantido no Chrome Android quando as vozes chegam de forma
+ *   assíncrona.
+ * - Chrome Android fica em silêncio quando nenhuma voz é explicitamente
+ *   definida; o módulo agora tenta pt-BR, depois pt, depois qualquer voz
+ *   disponível pra garantir que algo seja atribuído.
+ * - Chrome Android tem um bug onde o speechSynthesis para sozinho depois de
+ *   ~15s em textos longos; resolvido com um keepAlive que chama resume()
+ *   a cada 10s enquanto estiver em leitura.
+ * - O `if (!window.tts)` no app.js era a checagem errada (o objeto sempre
+ *   existe); checagem correta é `!window.speechSynthesis` (capacidade real).
  */
 
 const tts = (() => {
   const synth = window.speechSynthesis;
   let utteranceAtual = null;
-  let fila = [];
-  let indiceAtual = 0;
   let emLeitura = false;
   let emPausa = false;
+  let _keepAliveTimer = null;
 
-  // Configurações
   let config = {
     velocidade: 1,
     tom: 1,
     volume: 1,
-    idioma: 'pt-BR',
-    highlightCallback: null // callback pra destacar o texto sendo lido
+    idioma: 'pt-BR'
   };
 
-  // Vozes disponíveis (vai preencher ao carregar)
   let vozesDisponiveis = [];
 
-  function inicializar() {
-    if (!synth) {
-      console.warn('Web Speech API não suportada neste navegador');
-      return false;
-    }
+  // Carrega vozes imediatamente (funciona no Safari e Firefox)
+  // e também no onvoiceschanged (Chrome, especialmente no Android)
+  function _carregarVozes() {
+    const lista = synth ? synth.getVoices() : [];
+    if (lista.length) vozesDisponiveis = lista;
+  }
 
-    vozesDisponiveis = synth.getVoices();
-    if (synth.onvoiceschanged !== undefined) {
-      synth.onvoiceschanged = () => {
-        vozesDisponiveis = synth.getVoices();
-      };
-    }
-    return true;
+  _carregarVozes();
+  if (synth && synth.onvoiceschanged !== undefined) {
+    synth.onvoiceschanged = _carregarVozes;
+  }
+
+  function _escolherVoz() {
+    if (!vozesDisponiveis.length) _carregarVozes();
+    return (
+      vozesDisponiveis.find(v => v.lang === 'pt-BR') ||
+      vozesDisponiveis.find(v => v.lang.startsWith('pt')) ||
+      vozesDisponiveis[0] ||
+      null
+    );
+  }
+
+  function _iniciarKeepAlive() {
+    _pararKeepAlive();
+    // Chrome Android para a fala depois de ~15s — resume() faz ela continuar
+    _keepAliveTimer = setInterval(() => {
+      if (synth && emLeitura && !emPausa) {
+        synth.pause();
+        synth.resume();
+      }
+    }, 10000);
+  }
+
+  function _pararKeepAlive() {
+    if (_keepAliveTimer) { clearInterval(_keepAliveTimer); _keepAliveTimer = null; }
   }
 
   function falarTexto(texto, callback = null) {
-    if (!synth) {
-      console.warn('TTS não suportado');
+    if (!synth) return;
+    parar();
+
+    // Chrome Android às vezes recusa textos muito longos numa só utterance.
+    // Limita a 2000 caracteres por utterance — se o texto for maior, usa
+    // falarFila com pedaços de no máximo 2000 chars separados em frases.
+    if (texto.length > 2000) {
+      const pedacos = _dividirEmPedacos(texto, 2000);
+      falarFila(pedacos, callback);
       return;
     }
 
-    // Parar leitura anterior se houver
-    parar();
+    const u = new SpeechSynthesisUtterance(texto);
+    u.rate = config.velocidade;
+    u.pitch = config.tom;
+    u.volume = config.volume;
+    u.lang = config.idioma;
 
-    const utterance = new SpeechSynthesisUtterance(texto);
-    utterance.rate = config.velocidade;
-    utterance.pitch = config.tom;
-    utterance.volume = config.volume;
-    utterance.lang = config.idioma;
+    const voz = _escolherVoz();
+    if (voz) u.voice = voz;
 
-    // Tentar encontrar voz portuguesa
-    const vozPT = vozesDisponiveis.find(v => v.lang.includes('pt'));
-    if (vozPT) utterance.voice = vozPT;
-
-    utterance.onstart = () => {
-      emLeitura = true;
-      emPausa = false;
+    u.onstart = () => {
+      emLeitura = true; emPausa = false;
+      _iniciarKeepAlive();
       if (config.onStart) config.onStart();
     };
 
-    utterance.onend = () => {
-      emLeitura = false;
-      emPausa = false;
+    u.onend = () => {
+      emLeitura = false; emPausa = false;
+      _pararKeepAlive();
       if (callback) callback();
       if (config.onEnd) config.onEnd();
     };
 
-    utterance.onerror = (e) => {
-      console.error('Erro ao falar:', e);
+    u.onerror = (e) => {
+      // 'interrupted' é gerado pelo próprio cancel() — não é erro real
+      if (e.error === 'interrupted' || e.error === 'canceled') return;
+      console.error('[TTS] erro:', e.error);
       emLeitura = false;
+      _pararKeepAlive();
       if (config.onError) config.onError(e);
     };
 
-    utteranceAtual = utterance;
-    synth.speak(utterance);
+    utteranceAtual = u;
+    synth.speak(u);
+  }
+
+  /** Divide um texto longo em pedaços de até maxLen caracteres,
+   *  quebrando preferencialmente em fim de frase (. ! ?). */
+  function _dividirEmPedacos(texto, maxLen) {
+    const pedacos = [];
+    let restante = texto.trim();
+    while (restante.length > maxLen) {
+      let corte = restante.lastIndexOf('.', maxLen);
+      if (corte < maxLen * 0.5) corte = restante.lastIndexOf(' ', maxLen);
+      if (corte < 0) corte = maxLen;
+      pedacos.push(restante.slice(0, corte + 1).trim());
+      restante = restante.slice(corte + 1).trim();
+    }
+    if (restante) pedacos.push(restante);
+    return pedacos;
   }
 
   function falarFila(textos, callback = null) {
-    if (!synth) {
-      console.warn('TTS não suportado');
-      return;
-    }
-
+    if (!synth) return;
     parar();
-    fila = Array.isArray(textos) ? textos : [textos];
-    indiceAtual = 0;
+    const fila = (Array.isArray(textos) ? textos : [textos]).filter(Boolean);
+    if (!fila.length) { if (callback) callback(); return; }
+    let idx = 0;
 
-    function _lerProximo() {
-      if (indiceAtual >= fila.length) {
-        emLeitura = false;
-        if (callback) callback();
-        return;
-      }
-
-      const textoAtual = fila[indiceAtual];
-      indiceAtual++;
-
-      falarTexto(textoAtual, () => {
-        setTimeout(_lerProximo, 200); // pequeno delay entre items
-      });
+    function lerProximo() {
+      if (idx >= fila.length) { if (callback) callback(); return; }
+      const t = fila[idx++];
+      falarTexto(t, () => setTimeout(lerProximo, 150));
     }
-
-    _lerProximo();
+    lerProximo();
   }
 
   function pausar() {
     if (synth && emLeitura && !emPausa) {
-      synth.pause();
-      emPausa = true;
+      synth.pause(); emPausa = true;
+      _pararKeepAlive();
       if (config.onPause) config.onPause();
     }
   }
 
   function retomar() {
-    if (synth && emLeitura && emPausa) {
-      synth.resume();
-      emPausa = false;
+    if (synth && emPausa) {
+      synth.resume(); emPausa = false;
+      _iniciarKeepAlive();
       if (config.onResume) config.onResume();
     }
   }
 
   function parar() {
-    if (synth) {
-      synth.cancel();
-      emLeitura = false;
-      emPausa = false;
-      fila = [];
-      indiceAtual = 0;
-      if (config.onStop) config.onStop();
-    }
+    _pararKeepAlive();
+    if (synth) synth.cancel();
+    emLeitura = false; emPausa = false;
+    if (config.onStop) config.onStop();
   }
 
-  function definirVelocidade(vel) {
-    config.velocidade = Math.max(0.5, Math.min(2, vel));
-  }
-
-  function definirTom(t) {
-    config.tom = Math.max(0.5, Math.min(2, t));
-  }
-
-  function definirVolume(vol) {
-    config.volume = Math.max(0, Math.min(1, vol));
-  }
-
-  function definirIdioma(idioma) {
-    config.idioma = idioma;
-  }
-
-  function definirCallbacks(callbacks) {
-    Object.assign(config, callbacks);
-  }
-
-  function estaFalando() {
-    return emLeitura;
-  }
-
-  function estaPausado() {
-    return emPausa;
-  }
-
-  function obterVozes() {
-    return vozesDisponiveis.filter(v => v.lang.includes(config.idioma));
+  function suportado() {
+    return !!synth;
   }
 
   return {
-    inicializar,
+    suportado,
     falar: falarTexto,
     falarFila,
     pausar,
     retomar,
     parar,
-    definirVelocidade,
-    definirTom,
-    definirVolume,
-    definirIdioma,
-    definirCallbacks,
-    estaFalando,
-    estaPausado,
-    obterVozes,
+    definirVelocidade: (v) => { config.velocidade = Math.max(0.5, Math.min(2, v)); },
+    definirTom:        (t) => { config.tom        = Math.max(0.5, Math.min(2, t)); },
+    definirVolume:     (v) => { config.volume      = Math.max(0,   Math.min(1, v)); },
+    definirIdioma:     (i) => { config.idioma = i; },
+    definirCallbacks:  (cbs) => Object.assign(config, cbs),
+    estaFalando:  () => emLeitura,
+    estaPausado:  () => emPausa,
+    obterVozes:   () => vozesDisponiveis,
     config
   };
 })();
-
-// Inicializar TTS quando o app carrega
-document.addEventListener('DOMContentLoaded', () => {
-  if (window.tts) tts.inicializar();
-});

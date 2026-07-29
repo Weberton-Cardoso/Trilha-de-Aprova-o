@@ -2460,7 +2460,7 @@ function renderCaderno(view) {
       const id = Number(btn.dataset.ttsCard);
       const r = state.resumos.find(x => x.id === id);
       if (!r) return;
-      if (!window.tts) { showToast('TTS não disponível neste navegador.', 'danger'); return; }
+      if (!window.tts?.suportado()) { showToast('Leitura em voz alta não disponível neste navegador.', 'danger'); return; }
       const t = state.tentativas.find(x => x.id === r.tentativaId);
       const cabecalho = t ? `${t.disciplina}. ` : '';
       tts.falar(cabecalho + (r.textoBruto || '').replace(/[#*=~`]/g, '').replace(/\n+/g, '. '));
@@ -2518,7 +2518,7 @@ function renderCaderno(view) {
   renderMain();
 
   // ── Painel TTS — controles do painel fixo ──────────────────────────────
-  const _tts = window.tts;
+  const _tts = (window.tts && window.tts.suportado()) ? window.tts : null;
   const atualizarEstadoTTS = (msg) => {
     const s = $('#tts-status'); if (s) s.textContent = msg;
     const play = $('#tts-btn-play'), pause = $('#tts-btn-pause');
@@ -2536,12 +2536,13 @@ function renderCaderno(view) {
       onPause:  () => atualizarEstadoTTS('⏸️ Pausado — clique em ▶ pra retomar'),
       onResume: () => atualizarEstadoTTS('🔊 Lendo...'),
       onEnd:    () => atualizarEstadoTTS('✅ Leitura concluída'),
-      onError:  (e) => atualizarEstadoTTS(`❌ Erro: ${e.error}`)
+      onError:  (e) => atualizarEstadoTTS(`❌ Erro: ${e.error || 'desconhecido'}`)
     });
   }
 
-  // Botão "Ler em voz alta" no header — abre/fecha painel
+  // Botão "Ler em voz alta" no header — abre painel ou avisa se não suportado
   $('#caderno-btn-tts')?.addEventListener('click', () => {
+    if (!_tts) { showToast('Leitura em voz alta não suportada neste navegador.', 'danger'); return; }
     const painel = $('#caderno-tts-controls');
     if (painel) painel.hidden = !painel.hidden;
   });
@@ -2555,7 +2556,7 @@ function renderCaderno(view) {
 
   // Play — lê todos os resumos com checkbox marcado
   $('#tts-btn-play')?.addEventListener('click', () => {
-    if (!_tts) { showToast('TTS não disponível neste navegador.', 'danger'); return; }
+    if (!_tts) return;
     if (_tts.estaPausado()) { _tts.retomar(); return; }
 
     const marcados = $$('input.resumo-checkbox:checked').map(cb => {
