@@ -2193,6 +2193,40 @@ function renderCaderno(view) {
       <div class="caderno-sidebar" id="caderno-sidebar"></div>
       <div class="caderno-main" id="caderno-main"></div>
     </div>
+
+    <!-- Painel TTS: fica fora do caderno-layout pra não ser re-renderizado
+         junto com a lista de resumos. Oculto por padrão. -->
+    <div class="caderno-tts-controls" id="caderno-tts-controls" hidden>
+      <div class="caderno-tts-top">
+        <h3>🔊 Leitor de Resumos</h3>
+        <button class="btn btn-sm caderno-tts-close" id="tts-btn-fechar">✕</button>
+      </div>
+      <div class="caderno-tts-playback">
+        <button id="tts-btn-play" class="btn caderno-tts-btn">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
+          <span>Ler selecionados</span>
+        </button>
+        <button id="tts-btn-pause" class="btn caderno-tts-btn" hidden>
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+          <span>Pausar</span>
+        </button>
+        <button id="tts-btn-stop" class="btn caderno-tts-btn">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M6 6h12v12H6z"/></svg>
+          <span>Parar</span>
+        </button>
+      </div>
+      <div class="caderno-tts-settings">
+        <label>Velocidade:
+          <input type="range" id="tts-speed" min="0.5" max="2" step="0.1" value="1">
+          <span id="tts-speed-label">1.0x</span>
+        </label>
+        <label>Volume:
+          <input type="range" id="tts-volume" min="0" max="1" step="0.1" value="1">
+          <span id="tts-volume-label">100%</span>
+        </label>
+      </div>
+      <div id="tts-status" class="caderno-tts-status">Selecione resumos para ler (✅ no card).</div>
+    </div>
   `;
 
   function norm2(s) { return (s || '').trim().toLowerCase(); }
@@ -2274,6 +2308,7 @@ function renderCaderno(view) {
           <h2 style="margin:2px 0 0;font-size:19px;">${escapeHtml(topicoNode ? topicoNode.nome : 'Todos os tópicos')}</h2>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <button class="btn btn-sm" id="caderno-btn-tts" title="Selecione resumos e ouça a leitura em voz alta">🔊 Ler em voz alta</button>
           <button class="btn btn-primary btn-sm" id="btn-nova-anotacao-caderno">✏️ Nova Anotação</button>
           <input type="text" id="caderno-busca" class="search-input" style="max-width:220px;" placeholder="🔍 Buscar nos resumos..." value="${escapeHtml(_cadernoBusca)}">
         </div>
@@ -2291,10 +2326,14 @@ function renderCaderno(view) {
             return `
             <div class="card mb-12" data-resumo-card="${r.id}">
               <div class="flex" style="justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-                <div style="font-size:12px;color:var(--text-muted);">
-                  ${t ? `<b style="color:var(--text)">${escapeHtml(t.disciplina)}</b> · <span class="badge ${t.resultado === 'certa' ? 'success' : t.resultado === 'errada' ? 'danger' : 'muted'}">${t.resultado === 'certa' ? 'Certa' : t.resultado === 'errada' ? 'Errada' : 'Branco'}</span>` : '<span class="badge muted">Anotação Geral</span>'}
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <input type="checkbox" class="resumo-checkbox" data-resumo-id="${r.id}" title="Selecionar para leitura TTS" style="width:15px;height:15px;cursor:pointer;accent-color:var(--gold);">
+                  <div style="font-size:12px;color:var(--text-muted);">
+                    ${t ? `<b style="color:var(--text)">${escapeHtml(t.disciplina)}</b> · <span class="badge ${t.resultado === 'certa' ? 'success' : t.resultado === 'errada' ? 'danger' : 'muted'}">${t.resultado === 'certa' ? 'Certa' : t.resultado === 'errada' ? 'Errada' : 'Branco'}</span>` : '<span class="badge muted">Anotação Geral</span>'}
+                  </div>
                 </div>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                  <button class="btn btn-sm btn-ghost" data-tts-card="${r.id}" title="Ler este resumo em voz alta">🔊</button>
                   <button class="btn btn-sm btn-ghost" data-grifar-resumo="${r.id}" title="Selecione um texto no card e clique para grifar">🖍️ Grifar</button>
                   <button class="btn btn-sm" data-editar-resumo="${r.id}">✏️ Editar</button>
                   <button class="btn btn-sm btn-ghost" data-excluir-resumo="${r.id}">🗑 Excluir</button>
@@ -2416,6 +2455,19 @@ function renderCaderno(view) {
       showToast('Integração com Anki ainda não configurada nesta tela (próxima fase do roadmap).', '');
     }));
 
+    // ── TTS: leitura individual por card ──────────────────────────────────
+    $$('[data-tts-card]', main).forEach(btn => btn.addEventListener('click', () => {
+      const id = Number(btn.dataset.ttsCard);
+      const r = state.resumos.find(x => x.id === id);
+      if (!r) return;
+      if (!window.tts) { showToast('TTS não disponível neste navegador.', 'danger'); return; }
+      const t = state.tentativas.find(x => x.id === r.tentativaId);
+      const cabecalho = t ? `${t.disciplina}. ` : '';
+      tts.falar(cabecalho + (r.textoBruto || '').replace(/[#*=~`]/g, '').replace(/\n+/g, '. '));
+      const status = $('#tts-status');
+      if (status) status.textContent = '🔊 Lendo este card...';
+    }));
+
     $$('[data-excluir-resumo]', main).forEach(btn => btn.addEventListener('click', async () => {
       if (!confirm('Excluir este resumo do Caderno? Essa ação não pode ser desfeita.')) return;
       await db.resumos.remove(Number(btn.dataset.excluirResumo));
@@ -2465,8 +2517,99 @@ function renderCaderno(view) {
   renderSidebar();
   renderMain();
 
-  // TTS: Leitor de Resumos
-  if (window.setupTTSCaderno) setupTTSCaderno(view);
+  // ── Painel TTS — controles do painel fixo ──────────────────────────────
+  const _tts = window.tts;
+  const atualizarEstadoTTS = (msg) => {
+    const s = $('#tts-status'); if (s) s.textContent = msg;
+    const play = $('#tts-btn-play'), pause = $('#tts-btn-pause');
+    if (!play || !pause) return;
+    if (_tts && _tts.estaFalando() && !_tts.estaPausado()) {
+      play.hidden = true; pause.hidden = false;
+    } else {
+      play.hidden = false; pause.hidden = true;
+    }
+  };
+
+  if (_tts) {
+    _tts.definirCallbacks({
+      onStart:  () => atualizarEstadoTTS('🔊 Lendo...'),
+      onPause:  () => atualizarEstadoTTS('⏸️ Pausado — clique em ▶ pra retomar'),
+      onResume: () => atualizarEstadoTTS('🔊 Lendo...'),
+      onEnd:    () => atualizarEstadoTTS('✅ Leitura concluída'),
+      onError:  (e) => atualizarEstadoTTS(`❌ Erro: ${e.error}`)
+    });
+  }
+
+  // Botão "Ler em voz alta" no header — abre/fecha painel
+  $('#caderno-btn-tts')?.addEventListener('click', () => {
+    const painel = $('#caderno-tts-controls');
+    if (painel) painel.hidden = !painel.hidden;
+  });
+
+  // Fechar painel
+  $('#tts-btn-fechar')?.addEventListener('click', () => {
+    const painel = $('#caderno-tts-controls'); if (painel) painel.hidden = true;
+    _tts?.parar();
+    atualizarEstadoTTS('Selecione resumos para ler (✅ no card).');
+  });
+
+  // Play — lê todos os resumos com checkbox marcado
+  $('#tts-btn-play')?.addEventListener('click', () => {
+    if (!_tts) { showToast('TTS não disponível neste navegador.', 'danger'); return; }
+    if (_tts.estaPausado()) { _tts.retomar(); return; }
+
+    const marcados = $$('input.resumo-checkbox:checked').map(cb => {
+      return state.resumos.find(r => r.id === Number(cb.dataset.resumoId));
+    }).filter(Boolean);
+
+    if (!marcados.length) {
+      showToast('Marque pelo menos um resumo (✅) para ler.', 'info');
+      return;
+    }
+
+    const textos = marcados.map(r => {
+      const t = state.tentativas.find(x => x.id === r.tentativaId);
+      const cab = t ? `${t.disciplina}. ` : '';
+      return cab + (r.textoBruto || '').replace(/[#*=~`]/g, '').replace(/\n+/g, '. ');
+    });
+
+    const total = textos.length;
+    let atual = 0;
+    atualizarEstadoTTS(`🔊 Lendo resumo 1 de ${total}...`);
+
+    const lerProximo = () => {
+      if (atual >= total) { atualizarEstadoTTS('✅ Leitura concluída'); return; }
+      atual++;
+      const s = $('#tts-status');
+      if (s) s.textContent = `🔊 Lendo resumo ${atual} de ${total}...`;
+      _tts.falar(textos[atual - 1], lerProximo);
+    };
+    lerProximo();
+  });
+
+  // Pause/Resume — o botão alterna entre os dois estados
+  $('#tts-btn-pause')?.addEventListener('click', () => {
+    if (!_tts) return;
+    if (_tts.estaPausado()) { _tts.retomar(); } else { _tts.pausar(); }
+  });
+
+  // Stop
+  $('#tts-btn-stop')?.addEventListener('click', () => {
+    _tts?.parar();
+    atualizarEstadoTTS('Parado. Selecione resumos para ler (✅ no card).');
+  });
+
+  // Controles de velocidade e volume
+  $('#tts-speed')?.addEventListener('input', (e) => {
+    const v = parseFloat(e.target.value);
+    _tts?.definirVelocidade(v);
+    const label = $('#tts-speed-label'); if (label) label.textContent = `${v.toFixed(1)}x`;
+  });
+  $('#tts-volume')?.addEventListener('input', (e) => {
+    const v = parseFloat(e.target.value);
+    _tts?.definirVolume(v);
+    const label = $('#tts-volume-label'); if (label) label.textContent = `${Math.round(v * 100)}%`;
+  });
 }
 
 /* ============================================================
