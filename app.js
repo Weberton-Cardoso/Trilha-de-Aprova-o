@@ -549,6 +549,7 @@ function calcRelatorioDiario(dataISO = todayISO()) {
     numQuestoes: g.numQuestoes,
     acertos: g.acertos,
     erros: g.erros,
+    brancos: Math.max(0, g.numQuestoes - g.acertos - g.erros),
     taxa: g.numQuestoes ? (g.acertos / g.numQuestoes) * 100 : 0
   }));
 
@@ -560,8 +561,9 @@ function calcRelatorioDiario(dataISO = todayISO()) {
     acc.numQuestoes += g.numQuestoes;
     acc.acertos += g.acertos;
     acc.erros += g.erros;
+    acc.brancos += g.brancos;
     return acc;
-  }, { minutos: 0, numQuestoes: 0, acertos: 0, erros: 0 });
+  }, { minutos: 0, numQuestoes: 0, acertos: 0, erros: 0, brancos: 0 });
   totais.taxa = totais.numQuestoes ? (totais.acertos / totais.numQuestoes) * 100 : 0;
 
   return { materias, totais };
@@ -685,6 +687,7 @@ function renderDashboard(view) {
       <div class="stat-card"><div class="label">Total de questões</div><div class="value">${resumo.total}</div></div>
       <div class="stat-card success"><div class="label">Questões certas</div><div class="value">${resumo.certas}</div></div>
       <div class="stat-card danger"><div class="label">Questões erradas</div><div class="value">${resumo.erradas}</div></div>
+      <div class="stat-card"><div class="label">Questões em branco</div><div class="value">${resumo.brancos}</div></div>
       <div class="stat-card gold"><div class="label">Taxa de acerto</div><div class="value">${fmtPct(resumo.taxa)}</div></div>
       <div class="stat-card info"><div class="label">Tentativas registradas</div><div class="value">${resumo.tentativas}</div></div>
       <div class="stat-card"><div class="label">Média de questões/dia</div><div class="value">${mediaDiaria.toFixed(1)}</div></div>
@@ -750,11 +753,12 @@ function renderDashboard(view) {
 
   // gráficos
   try {
-    renderPieChart('chart-pizza', { acertos: resumo.certas, erros: resumo.erradas });
+    renderPieChart('chart-pizza', { acertos: resumo.certas, erros: resumo.erradas, brancos: resumo.brancos });
     renderBarChart('chart-barras', {
       labels: porDisciplina.map(d => d.nome),
       certas: porDisciplina.map(d => d.certas),
-      erradas: porDisciplina.map(d => d.erradas)
+      erradas: porDisciplina.map(d => d.erradas),
+      brancos: porDisciplina.map(d => d.brancos)
     });
   } catch (err) { console.error('Erro ao renderizar gráficos pizza/barras:', err); }
 
@@ -767,12 +771,13 @@ function renderDashboard(view) {
       if (iso < inicio) continue;
       const ts = state.tentativas.filter(t => t.data === iso);
       const r = calcResumo(ts);
-      diasEvolucao.push({ iso, certas: r.certas, total: r.total });
+      diasEvolucao.push({ iso, certas: r.certas, erradas: r.erradas, brancos: r.brancos, total: r.total });
     }
     renderLineChart('chart-linha', {
       labels: diasEvolucao.map(d => toBRDate(d.iso).slice(0, 5)),
       series: [
         { label: 'Certas', data: diasEvolucao.map(d => d.certas) },
+        { label: 'Em branco', data: diasEvolucao.map(d => d.brancos) },
         { label: 'Total', data: diasEvolucao.map(d => d.total) }
       ]
     });
@@ -931,6 +936,7 @@ function renderRelatorioDiario() {
       <div class="stat-card"><div class="label">Questões no dia</div><div class="value" style="font-size:20px;">${totais.numQuestoes}</div></div>
       <div class="stat-card success"><div class="label">Certas</div><div class="value" style="font-size:20px;">${totais.acertos}</div></div>
       <div class="stat-card danger"><div class="label">Erradas</div><div class="value" style="font-size:20px;">${totais.erros}</div></div>
+      <div class="stat-card"><div class="label">Em branco</div><div class="value" style="font-size:20px;">${totais.brancos}</div></div>
       <div class="stat-card gold"><div class="label">Taxa de acerto</div><div class="value" style="font-size:20px;">${fmtPct(totais.taxa)}</div></div>
     </div>
 
@@ -943,7 +949,7 @@ function renderRelatorioDiario() {
             <th>Tipo(s) de estudo</th>
             <th>Tempo</th>
             <th>Questões</th>
-            <th>Certas / Erradas</th>
+            <th>Certas / Erradas / Em branco</th>
             <th>Taxa</th>
           </tr>
         </thead>
@@ -955,7 +961,7 @@ function renderRelatorioDiario() {
               <td style="white-space:normal;max-width:200px;">${g.tipos.length ? g.tipos.map(tp => `<span class="badge muted" style="margin:2px 4px 2px 0;display:inline-block;">${escapeHtml(tp)}</span>`).join('') : '<span class="text-muted">-</span>'}</td>
               <td class="num">${g.minutos > 0 ? _formatarMinutos(g.minutos) : '-'}</td>
               <td class="num">${g.numQuestoes || '-'}</td>
-              <td class="num">${g.numQuestoes ? `<span style="color:var(--success)">${g.acertos}</span> / <span style="color:var(--danger)">${g.erros}</span>` : '-'}</td>
+              <td class="num">${g.numQuestoes ? `<span style="color:var(--success)">${g.acertos}</span> / <span style="color:var(--danger)">${g.erros}</span> / <span class="text-muted">${g.brancos}</span>` : '-'}</td>
               <td>
                 ${g.numQuestoes ? `
                   <div class="pct-bar-wrap">
@@ -1217,7 +1223,7 @@ function renderStatsPorDisciplina() {
       ${porDisciplina.length ? `
         <table>
           <thead>
-            <tr><th>Disciplina</th><th>Certas</th><th>Erradas</th><th>Total</th><th>%</th></tr>
+            <tr><th>Disciplina</th><th>Certas</th><th>Erradas</th><th>Em branco</th><th>Total</th><th>%</th></tr>
           </thead>
           <tbody>
             ${porDisciplina.map(d => `
@@ -1225,6 +1231,7 @@ function renderStatsPorDisciplina() {
                 <td>${escapeHtml(d.nome)}</td>
                 <td class="num" style="color:var(--success)">${d.certas}</td>
                 <td class="num" style="color:var(--danger)">${d.erradas}</td>
+                <td class="num text-muted">${d.brancos}</td>
                 <td class="num">${d.total}</td>
                 <td class="num" style="font-weight:700;">${fmtPct(d.taxa)}</td>
               </tr>
@@ -2488,7 +2495,7 @@ function renderAgrupamento(view, tipo) {
           <thead>
             <tr>
               ${isRanking ? '<th>#</th>' : ''}
-              <th>${cfg.titulo}</th><th>Tentativas</th><th>Certas</th><th>Erradas</th><th>Total</th><th>% de acerto</th>
+              <th>${cfg.titulo}</th><th>Tentativas</th><th>Certas</th><th>Erradas</th><th>Em branco</th><th>Total</th><th>% de acerto</th>
             </tr>
           </thead>
           <tbody>
@@ -2499,6 +2506,7 @@ function renderAgrupamento(view, tipo) {
                 <td class="num">${d.tentativas}</td>
                 <td class="num" style="color:var(--success)">${d.certas}</td>
                 <td class="num" style="color:var(--danger)">${d.erradas}</td>
+                <td class="num text-muted">${d.brancos}</td>
                 <td class="num">${d.total}</td>
                 <td>
                   <div class="pct-bar-wrap">
@@ -2546,6 +2554,7 @@ function renderDisciplinaDetalhe(view, nomeDisciplina) {
       <div class="stat-card"><div class="label">Total de questões</div><div class="value">${resumo.total}</div></div>
       <div class="stat-card success"><div class="label">Certas</div><div class="value">${resumo.certas}</div></div>
       <div class="stat-card danger"><div class="label">Erradas</div><div class="value">${resumo.erradas}</div></div>
+      <div class="stat-card"><div class="label">Em branco</div><div class="value">${resumo.brancos}</div></div>
       <div class="stat-card gold"><div class="label">% de acerto</div><div class="value">${fmtPct(resumo.taxa)}</div></div>
     </div>
 
@@ -2558,7 +2567,7 @@ function renderDisciplinaDetalhe(view, nomeDisciplina) {
     <div class="card" style="padding:0;">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Assunto</th><th>Tentativas</th><th>Certas</th><th>Erradas</th><th>Total</th><th>% de acerto</th></tr></thead>
+          <thead><tr><th>Assunto</th><th>Tentativas</th><th>Certas</th><th>Erradas</th><th>Em branco</th><th>Total</th><th>% de acerto</th></tr></thead>
           <tbody>
             ${porAssunto.map(a => `
               <tr class="clickable" data-assunto="${escapeHtml(a.nome)}">
@@ -2566,6 +2575,7 @@ function renderDisciplinaDetalhe(view, nomeDisciplina) {
                 <td class="num">${a.tentativas}</td>
                 <td class="num" style="color:var(--success)">${a.certas}</td>
                 <td class="num" style="color:var(--danger)">${a.erradas}</td>
+                <td class="num text-muted">${a.brancos}</td>
                 <td class="num">${a.total}</td>
                 <td>
                   <div class="pct-bar-wrap">
@@ -2649,6 +2659,7 @@ function renderAssuntoDetalhe(view, nomeAssunto) {
       <div class="stat-card"><div class="label">Total de questões</div><div class="value">${resumo.total}</div></div>
       <div class="stat-card success"><div class="label">Total de acertos</div><div class="value">${resumo.certas}</div></div>
       <div class="stat-card danger"><div class="label">Total de erros</div><div class="value">${resumo.erradas}</div></div>
+      <div class="stat-card"><div class="label">Em branco</div><div class="value">${resumo.brancos}</div></div>
       <div class="stat-card gold"><div class="label">Taxa média</div><div class="value">${fmtPct(resumo.taxa)}</div></div>
       <div class="stat-card success"><div class="label">Melhor resultado</div><div class="value">${fmtPct(melhor.taxa)}</div></div>
       <div class="stat-card danger"><div class="label">Pior resultado</div><div class="value">${fmtPct(pior.taxa)}</div></div>
