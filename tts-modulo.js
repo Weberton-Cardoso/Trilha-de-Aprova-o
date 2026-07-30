@@ -19,10 +19,10 @@
 
 const tts = (() => {
   const synth = window.speechSynthesis;
-  let utteranceAtual = null;
   let emLeitura = false;
   let emPausa = false;
   let _keepAliveTimer = null;
+  let _filaAtiva = false; // impede que onend de um item cancele a fila inteira
 
   let config = {
     velocidade: 1,
@@ -33,8 +33,6 @@ const tts = (() => {
 
   let vozesDisponiveis = [];
 
-  // Carrega vozes imediatamente (funciona no Safari e Firefox)
-  // e também no onvoiceschanged (Chrome, especialmente no Android)
   function _carregarVozes() {
     const lista = synth ? synth.getVoices() : [];
     if (lista.length) vozesDisponiveis = lista;
@@ -57,11 +55,14 @@ const tts = (() => {
 
   function _iniciarKeepAlive() {
     _pararKeepAlive();
-    // Chrome Android para a fala depois de ~15s — resume() faz ela continuar
+    // Chrome Android para a fala depois de ~15s — resume() força continuação.
+    // Usamos um flag interno pra garantir que pause/resume do keepAlive não
+    // aciona os callbacks de onPause/onResume visíveis ao usuário.
     _keepAliveTimer = setInterval(() => {
       if (synth && emLeitura && !emPausa) {
+        // pausa/retoma internamente sem alterar estado lógico
         synth.pause();
-        synth.resume();
+        setTimeout(() => { if (synth && emLeitura && !emPausa) synth.resume(); }, 50);
       }
     }, 10000);
   }
@@ -70,56 +71,64 @@ const tts = (() => {
     if (_keepAliveTimer) { clearInterval(_keepAliveTimer); _keepAliveTimer = null; }
   }
 
-  function falarTexto(texto, callback = null) {
-    if (!synth) return;
-    parar();
+  /** Fala um único texto. Se _filaAtiva=true não chama parar() no início
+   *  (porque a fila já gerencia o estado) — só cancela se for chamada solta. */
+  function _falarUmItem(texto, callback) {
+    if (!synth) { if (callback) callback(); return; }
 
-    // Chrome Android às vezes recusa textos muito longos numa só utterance.
-    // Limita a 2000 caracteres por utterance — se o texto for maior, usa
-    // falarFila com pedaços de no máximo 2000 chars separados em frases.
+    // Limita utterance a 2000 chars — Chrome Android rejeita textos muito longos
     if (texto.length > 2000) {
       const pedacos = _dividirEmPedacos(texto, 2000);
-      falarFila(pedacos, callback);
+      // insere os pedaços "à frente" sem resetar _filaAtiva
+      let idx = 0;
+      const lerPedaco = () => {
+        if (idx >= pedacos.length) { if (callback) callback(); return; }
+        _falarUmItem(pedacos[idx++], () => setTimeout(lerPedaco, 100));
+      };
+      lerPedaco();
       return;
     }
 
     const u = new SpeechSynthesisUtterance(texto);
-    u.rate = config.velocidade;
-    u.pitch = config.tom;
+    u.rate   = config.velocidade;
+    u.pitch  = config.tom;
     u.volume = config.volume;
-    u.lang = config.idioma;
-
+    u.lang   = config.idioma;
     const voz = _escolherVoz();
     if (voz) u.voice = voz;
 
     u.onstart = () => {
       emLeitura = true; emPausa = false;
       _iniciarKeepAlive();
-      if (config.onStart) config.onStart();
+      if (!_filaAtiva && config.onStart) config.onStart();
     };
 
     u.onend = () => {
-      emLeitura = false; emPausa = false;
-      _pararKeepAlive();
+      // onend é chamado inclusive pelo keepAlive pause/resume no Android —
+      // só encerra o estado se NÃO tivermos mais fila pendente
+      if (!_filaAtiva) {
+        emLeitura = false; emPausa = false;
+        _pararKeepAlive();
+        if (config.onEnd) config.onEnd();
+      }
       if (callback) callback();
-      if (config.onEnd) config.onEnd();
     };
 
     u.onerror = (e) => {
-      // 'interrupted' é gerado pelo próprio cancel() — não é erro real
-      if (e.error === 'interrupted' || e.error === 'canceled') return;
+      if (e.error === 'interrupted' || e.error === 'canceled') {
+        // erro gerado pelo próprio cancel() interno — não propaga
+        if (callback && !_filaAtiva) callback();
+        return;
+      }
       console.error('[TTS] erro:', e.error);
-      emLeitura = false;
+      emLeitura = false; emPausa = false;
       _pararKeepAlive();
       if (config.onError) config.onError(e);
     };
 
-    utteranceAtual = u;
     synth.speak(u);
   }
 
-  /** Divide um texto longo em pedaços de até maxLen caracteres,
-   *  quebrando preferencialmente em fim de frase (. ! ?). */
   function _dividirEmPedacos(texto, maxLen) {
     const pedacos = [];
     let restante = texto.trim();
@@ -134,24 +143,58 @@ const tts = (() => {
     return pedacos;
   }
 
+  function falarTexto(texto, callback = null) {
+    if (!synth) return;
+    parar(); // chamada solta — reseta tudo
+    _falarUmItem(texto, () => {
+      if (callback) callback();
+    });
+  }
+
   function falarFila(textos, callback = null) {
     if (!synth) return;
     parar();
-    const fila = (Array.isArray(textos) ? textos : [textos]).filter(Boolean);
+    const fila = (Array.isArray(textos) ? textos : [textos]).filter(t => t && t.trim());
     if (!fila.length) { if (callback) callback(); return; }
+
+    _filaAtiva = true;
+    emLeitura = true;
+    emPausa = false;
+    if (config.onStart) config.onStart();
+    _iniciarKeepAlive();
+
     let idx = 0;
 
     function lerProximo() {
-      if (idx >= fila.length) { if (callback) callback(); return; }
-      const t = fila[idx++];
-      falarTexto(t, () => setTimeout(lerProximo, 150));
+      if (!_filaAtiva) return; // foi parado externamente
+
+      if (idx >= fila.length) {
+        // Fila acabou normalmente
+        _filaAtiva = false;
+        emLeitura = false;
+        emPausa = false;
+        _pararKeepAlive();
+        if (config.onEnd) config.onEnd();
+        if (callback) callback();
+        return;
+      }
+
+      const t = fila[idx];
+      if (config.onItem) config.onItem(idx, fila.length);
+      idx++;
+
+      _falarUmItem(t, () => {
+        if (_filaAtiva) setTimeout(lerProximo, 150);
+      });
     }
+
     lerProximo();
   }
 
   function pausar() {
     if (synth && emLeitura && !emPausa) {
-      synth.pause(); emPausa = true;
+      synth.pause();
+      emPausa = true;
       _pararKeepAlive();
       if (config.onPause) config.onPause();
     }
@@ -159,7 +202,8 @@ const tts = (() => {
 
   function retomar() {
     if (synth && emPausa) {
-      synth.resume(); emPausa = false;
+      synth.resume();
+      emPausa = false;
       _iniciarKeepAlive();
       if (config.onResume) config.onResume();
     }
@@ -167,14 +211,14 @@ const tts = (() => {
 
   function parar() {
     _pararKeepAlive();
+    _filaAtiva = false;
+    emLeitura = false;
+    emPausa = false;
     if (synth) synth.cancel();
-    emLeitura = false; emPausa = false;
     if (config.onStop) config.onStop();
   }
 
-  function suportado() {
-    return !!synth;
-  }
+  function suportado() { return !!synth; }
 
   return {
     suportado,
@@ -195,7 +239,4 @@ const tts = (() => {
   };
 })();
 
-// Expõe no window para que outros scripts (app.js) possam acessar via window.tts.
-// 'const' no topo de um script clássico NÃO vira propriedade do window — por isso
-// a checagem 'window.tts && ...' em app.js sempre retornava undefined antes desta linha.
 window.tts = tts;
