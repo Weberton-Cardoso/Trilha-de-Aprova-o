@@ -414,6 +414,11 @@ async function router() {
       $('#page-title').textContent = `Assunto: ${decodeURIComponent(sub2)}`;
       updateActiveNav('estatisticas/assuntos');
       renderAssuntoDetalhe(view, decodeURIComponent(sub2));
+    } else if (sub === 'concursos' && sub2) {
+      const nomeConcurso = decodeURIComponent(sub2);
+      $('#page-title').textContent = `Concurso: ${nomeConcurso}`;
+      updateActiveNav('estatisticas/concursos');
+      renderConcursoDetalhe(view, nomeConcurso);
     } else {
       $('#page-title').textContent = PAGE_TITLES[routeKey] || 'Estatísticas';
       updateActiveNav(routeKey);
@@ -951,6 +956,7 @@ function renderRelatorioDiario() {
             <th>Questões</th>
             <th>Certas / Erradas / Em branco</th>
             <th>Taxa</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -970,13 +976,159 @@ function renderRelatorioDiario() {
                   </div>
                 ` : '<span class="text-muted">-</span>'}
               </td>
+              <td>
+                <button class="btn btn-sm btn-ghost relatorio-edit-btn" data-materia="${escapeHtml(g.nome)}" data-data="${dataSelecionada}" title="Adicionar/corrigir tempo ou questões desta matéria neste dia">
+                  ✏️
+                </button>
+              </td>
             </tr>
           `).join('')}
         </tbody>
       </table>
     </div>
+    <div style="margin-top:10px;text-align:right;">
+      <button class="btn btn-sm btn-ghost" id="btn-relatorio-add-materia" title="Adicionar uma matéria que não está na lista">
+        + Adicionar matéria
+      </button>
+    </div>
   `;
   _wireRelatorioDiarioNav();
+  _wireRelatorioEdicao(dataSelecionada);
+}
+
+/** Abre modal para adicionar/corrigir tempo ou questões de uma matéria no dia. */
+async function _abrirModalEdicaoRelatorio(nomeMateria, dataISO) {
+  const norm = s => (s || '').trim().toLowerCase();
+
+  // Sessões de ciclo existentes dessa matéria nesse dia
+  const sessoesExistentes = (state.cicloSessoes || []).filter(
+    s => s.data === dataISO && norm(s.nome) === norm(nomeMateria)
+  );
+
+  // Tentativas existentes dessa matéria nesse dia
+  const tentativasExistentes = (state.tentativas || []).filter(
+    t => t.data === dataISO && norm(t.disciplina) === norm(nomeMateria)
+  );
+
+  const totalMinutos = sessoesExistentes.reduce((s, ss) => s + (Number(ss.minutos) || 0), 0);
+
+  openModal(`
+    <h2>✏️ Editar: ${escapeHtml(nomeMateria)}</h2>
+    <p class="text-muted" style="font-size:13px;margin-top:0;">${toBRDate(dataISO)}</p>
+
+    <div class="card mb-12" style="background:var(--surface-2);">
+      <div class="card-title" style="font-size:13.5px;">⏱ Tempo de estudo registrado: ${_formatarMinutos(totalMinutos)}</div>
+      <div class="form-row" style="margin-top:10px;">
+        <label>Adicionar tempo (em minutos)</label>
+        <input type="number" id="rel-edit-minutos-add" min="1" placeholder="Ex: 30">
+      </div>
+      <div class="form-row">
+        <label>Ou corrigir o total (minutos)</label>
+        <input type="number" id="rel-edit-minutos-total" min="0" placeholder="Ex: 90 (substitui o total atual)">
+      </div>
+      <div class="form-row">
+        <label>Tópico estudado (opcional)</label>
+        <input type="text" id="rel-edit-topico" placeholder="Ex: Espécies Tributárias">
+      </div>
+      <div class="form-row">
+        <label>Tipo de estudo (opcional)</label>
+        <select id="rel-edit-tipo">
+          <option value="">Não informar</option>
+          <option value="Primeiro estudo">Primeiro estudo</option>
+          <option value="Revisão">Revisão</option>
+          <option value="Vídeo">Vídeo</option>
+          <option value="Leitura">Leitura</option>
+          <option value="Exercícios">Exercícios</option>
+          <option value="Simulado">Simulado</option>
+        </select>
+      </div>
+      <button class="btn btn-primary mt-8" id="btn-rel-salvar-tempo">Salvar tempo</button>
+    </div>
+
+    ${tentativasExistentes.length ? `
+    <div class="card" style="background:var(--surface-2);">
+      <div class="card-title" style="font-size:13.5px;">📝 Tentativas de questões registradas</div>
+      ${tentativasExistentes.map(t => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:10px;">
+          <span style="font-size:13px;">${escapeHtml(t.assunto || '(sem tópico)')} — ${t.numQuestoes} questões (${fmtPct(t.taxa)})</span>
+          <button class="btn btn-sm btn-ghost" data-editar-tentativa="${t.id}">Editar</button>
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
+  `);
+
+  // Salvar tempo
+  $('#btn-rel-salvar-tempo')?.addEventListener('click', async () => {
+    const adicionar = Number($('#rel-edit-minutos-add')?.value || 0);
+    const total     = Number($('#rel-edit-minutos-total')?.value || -1);
+    const topico    = $('#rel-edit-topico')?.value.trim() || null;
+    const tipo      = $('#rel-edit-tipo')?.value || null;
+
+    if (adicionar <= 0 && total < 0) {
+      showToast('Informe quantos minutos adicionar ou o total correto.', 'error');
+      return;
+    }
+
+    let minutosNovas;
+    if (total >= 0) {
+      // Corrigir: calcula a diferença para ajustar o cicloMateria
+      minutosNovas = total - totalMinutos;
+    } else {
+      minutosNovas = adicionar;
+    }
+
+    // Cria uma sessão manual para o dia e matéria informados
+    const materia = (state.cicloMaterias || []).find(m =>
+      norm(m.nome) === norm(nomeMateria)
+    );
+    await db.cicloSessoes.add({
+      cicloMateriaId: materia ? materia.id : null,
+      nome: nomeMateria,
+      data: dataISO,
+      minutos: minutosNovas,
+      inicio: new Date(`${dataISO}T12:00:00`).toISOString(),
+      fim:    new Date(`${dataISO}T12:00:00`).toISOString(),
+      ajusteManual: true,
+      ...(topico ? { topico } : {}),
+      ...(tipo   ? { tipoEstudo: tipo } : {})
+    });
+
+    // Atualiza minutosFeitos do cicloMateria se existir
+    if (materia && minutosNovas !== 0) {
+      materia.minutosFeitos = Math.max(0, (materia.minutosFeitos || 0) + minutosNovas);
+      await db.cicloMaterias.update(materia);
+    }
+
+    closeModal();
+    await reloadState();
+    renderRelatorioDiario();
+    showToast('Tempo atualizado no relatório.', 'success');
+  });
+
+  // Editar tentativa existente
+  $$('[data-editar-tentativa]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const t = state.tentativas.find(x => x.id === Number(btn.dataset.editarTentativa));
+      if (!t) return;
+      closeModal();
+      openTentativaModal(t);
+    });
+  });
+}
+
+function _wireRelatorioEdicao(dataSelecionada) {
+  $$('.relatorio-edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _abrirModalEdicaoRelatorio(btn.dataset.materia, btn.dataset.data);
+    });
+  });
+
+  $('#btn-relatorio-add-materia')?.addEventListener('click', () => {
+    const nome = prompt('Nome da matéria a adicionar no relatório deste dia:');
+    if (!nome || !nome.trim()) return;
+    _abrirModalEdicaoRelatorio(nome.trim(), dataSelecionada);
+  });
 }
 
 /** Conecta as setas de navegação e o campo de data do relatório diário —
@@ -2631,7 +2783,7 @@ const AGRUPAMENTO_CONFIG = {
   disciplinas: { chave: 'disciplina', titulo: 'Disciplina', clicavel: true, rota: 'disciplinas' },
   assuntos: { chave: 'assunto', titulo: 'Assunto', clicavel: true, rota: 'assuntos' },
   bancas: { chave: 'banca', titulo: 'Banca', clicavel: false },
-  concursos: { chave: 'concurso', titulo: 'Concurso', clicavel: false }
+  concursos: { chave: 'concurso', titulo: 'Concurso', clicavel: true, rota: 'concursos' }
 };
 
 function renderAgrupamento(view, tipo) {
@@ -2862,6 +3014,158 @@ function renderAssuntoDetalhe(view, nomeAssunto) {
     series: [
       { label: '% de acerto', data: ordenada.map(t => Number(t.taxa.toFixed(1))) }
     ]
+  });
+}
+
+/* ============================================================
+   TELA: DETALHE DO CONCURSO
+   Mostra disciplinas e tópicos estudados para um concurso específico,
+   com quantidade de vezes que viu cada tópico e taxa de acertos.
+   ============================================================ */
+
+function renderConcursoDetalhe(view, nomeConcurso) {
+  const norm = s => (s || '').trim().toLowerCase();
+  const lista = state.tentativas.filter(t =>
+    norm(t.concurso || '(Não informado)') === norm(nomeConcurso)
+  );
+
+  if (!lista.length) {
+    view.innerHTML = `
+      <div class="flex mb-12"><a href="#/estatisticas/concursos" class="btn btn-ghost btn-sm">&larr; Voltar</a></div>
+      <div class="empty-state"><p>Nenhuma tentativa registrada para o concurso <strong>${escapeHtml(nomeConcurso)}</strong>.</p></div>
+    `;
+    return;
+  }
+
+  const resumoGeral = calcResumo(lista);
+
+  // Agrupa por disciplina → tópico, contando vezes visto (nº de tentativas) e acertos
+  const porDisciplina = new Map();
+  lista.forEach(t => {
+    const disc = (t.disciplina || '(Não informado)').trim();
+    const top  = (t.assunto   || '(Sem tópico)').trim();
+    const chaveDisc = norm(disc);
+    if (!porDisciplina.has(chaveDisc)) {
+      porDisciplina.set(chaveDisc, { nome: disc, topicos: new Map(),
+        numQuestoes: 0, acertos: 0, erros: 0, tentativas: 0 });
+    }
+    const gDisc = porDisciplina.get(chaveDisc);
+    gDisc.numQuestoes += Number(t.numQuestoes) || 0;
+    gDisc.acertos     += Number(t.acertos)     || 0;
+    gDisc.erros       += Number(t.erros)       || 0;
+    gDisc.tentativas  += 1;
+
+    const chaveTop = norm(top);
+    if (!gDisc.topicos.has(chaveTop)) {
+      gDisc.topicos.set(chaveTop, { nome: top, vezes: 0,
+        numQuestoes: 0, acertos: 0, erros: 0 });
+    }
+    const gTop = gDisc.topicos.get(chaveTop);
+    gTop.vezes       += 1;
+    gTop.numQuestoes += Number(t.numQuestoes) || 0;
+    gTop.acertos     += Number(t.acertos)     || 0;
+    gTop.erros       += Number(t.erros)       || 0;
+  });
+
+  const disciplinas = Array.from(porDisciplina.values())
+    .sort((a, b) => b.numQuestoes - a.numQuestoes || b.tentativas - a.tentativas);
+
+  const linhasHTML = disciplinas.map(disc => {
+    const taxa = disc.numQuestoes ? (disc.acertos / disc.numQuestoes * 100) : 0;
+    const tops = Array.from(disc.topicos.values())
+      .sort((a, b) => b.vezes - a.vezes || b.numQuestoes - a.numQuestoes);
+    const topicosRows = tops.map(tp => {
+      const tpTaxa = tp.numQuestoes ? (tp.acertos / tp.numQuestoes * 100) : 0;
+      return `
+        <tr style="background:var(--surface);">
+          <td style="padding-left:32px;font-size:12.5px;color:var(--text-muted);">
+            ↳ ${escapeHtml(tp.nome)}
+          </td>
+          <td class="num" style="font-size:12.5px;">${tp.vezes}×</td>
+          <td class="num" style="font-size:12.5px;color:var(--success);">${tp.acertos}</td>
+          <td class="num" style="font-size:12.5px;color:var(--danger);">${tp.erros}</td>
+          <td class="num" style="font-size:12.5px;">${tp.numQuestoes}</td>
+          <td>
+            ${tp.numQuestoes ? `
+              <div class="pct-bar-wrap">
+                <div class="pct-bar"><span style="width:${tpTaxa.toFixed(1)}%"></span></div>
+                <span class="num" style="font-size:12px;">${fmtPct(tpTaxa)}</span>
+              </div>` : '<span class="text-muted" style="font-size:12px;">-</span>'}
+          </td>
+        </tr>`;
+    }).join('');
+
+    return `
+      <tr class="clickable concurso-disc-row" data-disc="${escapeHtml(disc.nome)}" title="Clique para expandir/recolher tópicos">
+        <td style="font-weight:700;">${escapeHtml(disc.nome)}</td>
+        <td class="num">${disc.tentativas}</td>
+        <td class="num" style="color:var(--success);">${disc.acertos}</td>
+        <td class="num" style="color:var(--danger);">${disc.erros}</td>
+        <td class="num">${disc.numQuestoes}</td>
+        <td>
+          ${disc.numQuestoes ? `
+            <div class="pct-bar-wrap">
+              <div class="pct-bar"><span style="width:${taxa.toFixed(1)}%"></span></div>
+              <span class="num">${fmtPct(taxa)}</span>
+            </div>` : '<span class="text-muted">-</span>'}
+        </td>
+      </tr>
+      <tr class="concurso-topicos-row" data-topicos-de="${escapeHtml(disc.nome)}" style="display:none;">
+        <td colspan="6" style="padding:0;">
+          <table style="width:100%;border-collapse:collapse;">
+            <tbody>${topicosRows}</tbody>
+          </table>
+        </td>
+      </tr>`;
+  }).join('');
+
+  view.innerHTML = `
+    <div class="flex mb-12">
+      <a href="#/estatisticas/concursos" class="btn btn-ghost btn-sm">&larr; Voltar</a>
+    </div>
+
+    <div class="stat-grid" style="margin-bottom:16px;">
+      <div class="stat-card"><div class="label">Tentativas</div><div class="value">${resumoGeral.tentativas}</div></div>
+      <div class="stat-card"><div class="label">Total de questões</div><div class="value">${resumoGeral.total}</div></div>
+      <div class="stat-card success"><div class="label">Certas</div><div class="value">${resumoGeral.certas}</div></div>
+      <div class="stat-card danger"><div class="label">Erradas</div><div class="value">${resumoGeral.erradas}</div></div>
+      <div class="stat-card"><div class="label">Em branco</div><div class="value">${resumoGeral.brancos}</div></div>
+      <div class="stat-card gold"><div class="label">% de acerto</div><div class="value">${fmtPct(resumoGeral.taxa)}</div></div>
+    </div>
+
+    <p class="text-muted" style="font-size:12.5px;margin-bottom:10px;">
+      Clique em uma disciplina para ver os tópicos estudados e quantas vezes cada um foi visto.
+    </p>
+
+    <div class="card" style="padding:0;">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Disciplina / Tópico</th>
+              <th>Tentativas / Vezes</th>
+              <th>Certas</th>
+              <th>Erradas</th>
+              <th>Total</th>
+              <th>% de acerto</th>
+            </tr>
+          </thead>
+          <tbody>${linhasHTML}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  // Toggle expand/collapse dos tópicos ao clicar na disciplina
+  $$('.concurso-disc-row', view).forEach(tr => {
+    tr.addEventListener('click', () => {
+      const discNome = tr.dataset.disc;
+      const topicosRow = view.querySelector(`.concurso-topicos-row[data-topicos-de="${CSS.escape(discNome)}"]`);
+      if (!topicosRow) return;
+      const escondida = topicosRow.style.display === 'none';
+      topicosRow.style.display = escondida ? 'table-row' : 'none';
+      tr.style.background = escondida ? 'var(--gold-soft)' : '';
+    });
   });
 }
 
