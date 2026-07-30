@@ -16,8 +16,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
 <link rel="stylesheet" href="style.css">
-<!-- TTS (Text-to-Speech): Leitor de Resumos -->
-<link rel="stylesheet" href="tts-caderno-estilos.css">
 </head>
 <body>
 
@@ -30,9 +28,7 @@
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-head">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="17" height="17"><path fill="#fff" d="M12 2.5L1 8l11 5.5L20.5 9.2V16h1.5V8L12 2.5zM5 12.68v4.28C5 19.2 8.13 21 12 21s7-1.8 7-4.04v-4.28l-7 3.5-7-3.5z"/></svg>
-        </span>
+        <span class="brand-mark" aria-hidden="true"></span>
         <span class="brand-text">
           <strong>Trilha</strong>
           <small>de Aprovação</small>
@@ -135,16 +131,6 @@
         <div class="perfil-selector-menu" id="perfil-selector-menu"></div>
       </div>
       <h1 id="page-title">Dashboard</h1>
-      <!-- Widget do Ciclo de Estudos na topbar — gerenciado por ciclo.js -->
-      <div id="ciclo-topbar-widget" style="display:none;" class="ciclo-topbar-widget">
-        <span class="ciclo-topbar-dot" id="ciclo-topbar-dot"></span>
-        <span class="ciclo-topbar-nome" id="ciclo-topbar-nome"></span>
-        <span class="ciclo-topbar-relogio" id="ciclo-topbar-relogio">00:00</span>
-        <button class="ciclo-topbar-btn" id="ciclo-topbar-pausar"  title="Pausar sessão">⏸</button>
-        <button class="ciclo-topbar-btn" id="ciclo-topbar-retomar" title="Retomar sessão" style="display:none;">▶</button>
-        <button class="ciclo-topbar-btn ciclo-topbar-btn-ok" id="ciclo-topbar-concluir" title="Concluir sessão">✓</button>
-        <button class="ciclo-topbar-btn" id="ciclo-topbar-cancelar" title="Cancelar sessão">✕</button>
-      </div>
       <button id="add-questao-btn" class="btn btn-primary btn-sm">
         <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
         <span class="btn-label">Registrar tentativa</span>
@@ -185,9 +171,7 @@
 <script src="perfis.js"></script>
 <script src="cloud-sync.js"></script>
 <script src="tts-modulo.js"></script>
-<script src="tts-caderno-integracao.js"></script>
 <script src="app.js"></script>
-
 <script>
   // Liga o botão de sincronização da sidebar ao cloud-sync.js
   (function () {
