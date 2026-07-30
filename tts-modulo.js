@@ -57,10 +57,11 @@ const tts = (() => {
 
   function _iniciarKeepAlive() {
     _pararKeepAlive();
-    // Chrome Android para a fala depois de ~15s — resume() faz ela continuar
+    // Chrome Android para a fala depois de ~15s — resume() sozinho é suficiente
+    // para manter. NÃO usar pause() antes: no Android ele cancela tudo em vez
+    // de pausar, derrubando a utterance inteira.
     _keepAliveTimer = setInterval(() => {
       if (synth && emLeitura && !emPausa) {
-        synth.pause();
         synth.resume();
       }
     }, 10000);
@@ -72,50 +73,61 @@ const tts = (() => {
 
   function falarTexto(texto, callback = null) {
     if (!synth) return;
-    parar();
 
-    // Chrome Android às vezes recusa textos muito longos numa só utterance.
-    // Limita a 2000 caracteres por utterance — se o texto for maior, usa
-    // falarFila com pedaços de no máximo 2000 chars separados em frases.
-    if (texto.length > 2000) {
-      const pedacos = _dividirEmPedacos(texto, 2000);
-      falarFila(pedacos, callback);
-      return;
-    }
+    // Cancela qualquer fala em andamento antes de iniciar a nova.
+    // Chrome Android tem um bug: speak() logo após cancel() não dispara onstart
+    // e a fala some silenciosamente. O delay de 80ms dá tempo ao navegador
+    // de processar o cancel() antes de aceitar o novo speak().
+    const _falar = () => {
+      if (texto.length > 2000) {
+        const pedacos = _dividirEmPedacos(texto, 2000);
+        falarFila(pedacos, callback);
+        return;
+      }
 
-    const u = new SpeechSynthesisUtterance(texto);
-    u.rate = config.velocidade;
-    u.pitch = config.tom;
-    u.volume = config.volume;
-    u.lang = config.idioma;
+      const u = new SpeechSynthesisUtterance(texto);
+      u.rate = config.velocidade;
+      u.pitch = config.tom;
+      u.volume = config.volume;
+      u.lang = config.idioma;
 
-    const voz = _escolherVoz();
-    if (voz) u.voice = voz;
+      const voz = _escolherVoz();
+      if (voz) u.voice = voz;
 
-    u.onstart = () => {
-      emLeitura = true; emPausa = false;
-      _iniciarKeepAlive();
-      if (config.onStart) config.onStart();
+      u.onstart = () => {
+        emLeitura = true; emPausa = false;
+        _iniciarKeepAlive();
+        if (config.onStart) config.onStart();
+      };
+
+      u.onend = () => {
+        emLeitura = false; emPausa = false;
+        _pararKeepAlive();
+        if (callback) callback();
+        if (config.onEnd) config.onEnd();
+      };
+
+      u.onerror = (e) => {
+        if (e.error === 'interrupted' || e.error === 'canceled') return;
+        console.error('[TTS] erro:', e.error);
+        emLeitura = false;
+        _pararKeepAlive();
+        if (config.onError) config.onError(e);
+      };
+
+      utteranceAtual = u;
+      synth.speak(u);
     };
 
-    u.onend = () => {
+    if (synth.speaking || synth.pending) {
+      synth.cancel();
       emLeitura = false; emPausa = false;
       _pararKeepAlive();
-      if (callback) callback();
-      if (config.onEnd) config.onEnd();
-    };
-
-    u.onerror = (e) => {
-      // 'interrupted' é gerado pelo próprio cancel() — não é erro real
-      if (e.error === 'interrupted' || e.error === 'canceled') return;
-      console.error('[TTS] erro:', e.error);
-      emLeitura = false;
-      _pararKeepAlive();
-      if (config.onError) config.onError(e);
-    };
-
-    utteranceAtual = u;
-    synth.speak(u);
+      // Delay necessário no Chrome Android entre cancel() e speak()
+      setTimeout(_falar, 80);
+    } else {
+      _falar();
+    }
   }
 
   /** Divide um texto longo em pedaços de até maxLen caracteres,
@@ -167,7 +179,7 @@ const tts = (() => {
 
   function parar() {
     _pararKeepAlive();
-    if (synth) synth.cancel();
+    if (synth && (synth.speaking || synth.pending)) synth.cancel();
     emLeitura = false; emPausa = false;
     if (config.onStop) config.onStop();
   }
