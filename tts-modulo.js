@@ -22,6 +22,7 @@ const tts = (() => {
   let emLeitura = false;
   let emPausa = false;
   let _keepAliveTimer = null;
+  let _emKeepAlive = false; // bloqueia onend durante o ciclo pause/resume do keepAlive
   let _filaAtiva = false; // impede que onend de um item cancele a fila inteira
 
   let config = {
@@ -60,11 +61,15 @@ const tts = (() => {
     // aciona os callbacks de onPause/onResume visíveis ao usuário.
     _keepAliveTimer = setInterval(() => {
       if (synth && emLeitura && !emPausa) {
-        // pausa/retoma internamente sem alterar estado lógico
+        _emKeepAlive = true;
         synth.pause();
-        setTimeout(() => { if (synth && emLeitura && !emPausa) synth.resume(); }, 50);
+        setTimeout(() => {
+          if (synth && emLeitura && !emPausa) synth.resume();
+          // dá 300ms de margem antes de liberar o flag — o onend pode chegar atrasado
+          setTimeout(() => { _emKeepAlive = false; }, 300);
+        }, 50);
       }
-    }, 10000);
+    }, 8000);
   }
 
   function _pararKeepAlive() {
@@ -104,8 +109,10 @@ const tts = (() => {
     };
 
     u.onend = () => {
-      // onend é chamado inclusive pelo keepAlive pause/resume no Android —
-      // só encerra o estado se NÃO tivermos mais fila pendente
+      // Chrome Android dispara onend durante o pause/resume do keepAlive —
+      // ignoramos nesses casos pra não encerrar a leitura prematuramente.
+      if (_emKeepAlive) return;
+
       if (!_filaAtiva) {
         emLeitura = false; emPausa = false;
         _pararKeepAlive();
@@ -115,8 +122,8 @@ const tts = (() => {
     };
 
     u.onerror = (e) => {
+      if (_emKeepAlive) return; // erro do pause/resume interno — ignora
       if (e.error === 'interrupted' || e.error === 'canceled') {
-        // erro gerado pelo próprio cancel() interno — não propaga
         if (callback && !_filaAtiva) callback();
         return;
       }
@@ -211,6 +218,7 @@ const tts = (() => {
 
   function parar() {
     _pararKeepAlive();
+    _emKeepAlive = false;
     _filaAtiva = false;
     emLeitura = false;
     emPausa = false;
