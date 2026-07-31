@@ -131,6 +131,32 @@
         <div class="perfil-selector-menu" id="perfil-selector-menu"></div>
       </div>
       <h1 id="page-title">Dashboard</h1>
+
+      <!-- Widget do Ciclo de Estudos na topbar — gerenciado por ciclo.js
+           Aparece automaticamente quando uma sessão está ativa -->
+      <div id="ciclo-topbar-widget" class="ciclo-topbar-widget" style="display:none;">
+        <div class="ciclo-topbar-dot" id="ciclo-topbar-dot"></div>
+        <div class="ciclo-topbar-info">
+          <span class="ciclo-topbar-status" id="ciclo-topbar-status">EM ANDAMENTO</span>
+          <span class="ciclo-topbar-nome" id="ciclo-topbar-nome"></span>
+        </div>
+        <span class="ciclo-topbar-relogio" id="ciclo-topbar-relogio">00:00</span>
+        <div class="ciclo-topbar-btns">
+          <button class="ciclo-topbar-btn" id="ciclo-topbar-pausar" title="Pausar sessão">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+          </button>
+          <button class="ciclo-topbar-btn" id="ciclo-topbar-retomar" title="Retomar sessão" style="display:none;">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
+          </button>
+          <button class="ciclo-topbar-btn ciclo-topbar-btn-ok" id="ciclo-topbar-concluir" title="Concluir sessão">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+          </button>
+          <button class="ciclo-topbar-btn ciclo-topbar-btn-cancel" id="ciclo-topbar-cancelar" title="Cancelar sessão">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+      </div>
+
       <button id="add-questao-btn" class="btn btn-primary btn-sm">
         <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
         <span class="btn-label">Registrar tentativa</span>

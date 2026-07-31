@@ -870,6 +870,10 @@ function _atualizarCicloFlutuante() {
   widget.style.display = 'flex';
   widget.classList.toggle('pausado', pausado);
 
+  // Atualiza texto do status
+  const elStatus = document.getElementById('ciclo-topbar-status');
+  if (elStatus) elStatus.textContent = pausado ? 'PAUSADO' : 'EM ANDAMENTO';
+
   // Nome clicável → navega para o painel do ciclo
   const elNome = document.getElementById('ciclo-topbar-nome');
   if (elNome) {
