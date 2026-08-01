@@ -46,7 +46,7 @@
  */
 
 const DB_NAME = 'TrilhaAprovacaoDB';
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 
 const STORES = {
   tentativas: 'tentativas',
@@ -58,7 +58,8 @@ const STORES = {
   cicloConfig: 'cicloConfig',
   perfis: 'perfis',
   backupsLocais: 'backupsLocais',
-  resumos: 'resumos'
+  resumos: 'resumos',
+  revisoes: 'revisoes'
 };
 
 /** Stores que pertencem a um perfil de estatísticas específico — getAll/add/clear
@@ -273,6 +274,12 @@ function openDB() {
         resumosStore.createIndex('data', 'data', { unique: false });
         resumosStore.createIndex('materia', 'materia', { unique: false });
       }
+      // v10: Sistema de Revisão do Dia — rastreia revisões concluídas por tema.
+      if (!db.objectStoreNames.contains(STORES.revisoes)) {
+        const revisoesStore = db.createObjectStore(STORES.revisoes, { keyPath: 'id', autoIncrement: true });
+        revisoesStore.createIndex('data', 'data', { unique: false });
+        revisoesStore.createIndex('disciplina', 'disciplina', { unique: false });
+      }
     };
 
     req.onsuccess = (event) => resolve(event.target.result);
@@ -450,6 +457,14 @@ const db = {
     get: (id) => db.get(STORES.resumos, id),
     getAll: () => db.getAll(STORES.resumos),
     clear: () => db.clear(STORES.resumos)
+  },
+
+  // Sistema de Revisão do Dia (v10) — sem escopo por perfil.
+  revisoes: {
+    add: (r) => db.add(STORES.revisoes, r),
+    remove: (id) => db.remove(STORES.revisoes, id),
+    getAll: () => db.getAll(STORES.revisoes),
+    clear: () => db.clear(STORES.revisoes)
   },
 
   // Perfis de estatísticas (não filtrados por perfil — é a própria lista deles).

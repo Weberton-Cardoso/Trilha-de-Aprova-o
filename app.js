@@ -107,6 +107,7 @@ const state = {
   cicloSessoes: [],
   perfis: [],
   resumos: [],
+  revisoes: [],
   dashboardFiltro: { tipo: '7d', inicio: null, fim: null },
   statsDisciplinaFiltro: { tipo: 'tudo', inicio: null, fim: null, disciplina: 'todas' }
 };
@@ -125,6 +126,8 @@ async function reloadState() {
   state.editais = editais;
   state.simulados = simulados;
   state.resumos = resumos;
+  // revisoes: fallback seguro — funciona mesmo antes da migração v10
+  try { state.revisoes = await db.revisoes.getAll(); } catch (_) { state.revisoes = []; }
 }
 
 /** Disciplinas sugeridas por padrão no autocomplete, mesmo antes de qualquer
@@ -345,6 +348,8 @@ const PAGE_TITLES = {
   'caderno': 'Caderno de Resumos',
   'importar-historico': 'Importar Histórico',
   'ciclo': 'Ciclo de Estudos',
+  'revisao': 'Revisão do Dia',
+  'evolucao-revisao': 'Evolução da Revisão',
   'estatisticas/disciplinas': 'Estatísticas por Disciplina',
   'estatisticas/assuntos': 'Estatísticas por Assunto',
   'estatisticas/bancas': 'Estatísticas por Banca',
@@ -450,6 +455,14 @@ async function router() {
     $('#page-title').textContent = PAGE_TITLES['perfis'];
     updateActiveNav('perfis');
     renderPerfisPage(view);
+  } else if (base === 'revisao') {
+    $('#page-title').textContent = PAGE_TITLES['revisao'];
+    updateActiveNav('revisao');
+    if (typeof renderRevisao === 'function') renderRevisao(view);
+  } else if (base === 'evolucao-revisao') {
+    $('#page-title').textContent = PAGE_TITLES['evolucao-revisao'];
+    updateActiveNav('revisao');
+    if (typeof renderEvolucaoRevisao === 'function') renderEvolucaoRevisao(view);
   } else if (base === 'configuracoes') {
     $('#page-title').textContent = PAGE_TITLES['configuracoes'];
     updateActiveNav('configuracoes');
