@@ -74,40 +74,6 @@ function renderCaderno(view) {
       <div class="caderno-sidebar" id="caderno-sidebar"></div>
       <div class="caderno-main" id="caderno-main"></div>
     </div>
-
-    <!-- Painel TTS: fica fora do caderno-layout pra não ser re-renderizado
-         junto com a lista de resumos. Oculto por padrão. -->
-    <div class="caderno-tts-controls" id="caderno-tts-controls" hidden>
-      <div class="caderno-tts-top">
-        <h3>🔊 Leitor de Resumos</h3>
-        <button class="btn btn-sm caderno-tts-close" id="tts-btn-fechar">✕</button>
-      </div>
-      <div class="caderno-tts-playback">
-        <button id="tts-btn-play" class="btn caderno-tts-btn">
-          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
-          <span>Ler selecionados</span>
-        </button>
-        <button id="tts-btn-pause" class="btn caderno-tts-btn" hidden>
-          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
-          <span>Pausar</span>
-        </button>
-        <button id="tts-btn-stop" class="btn caderno-tts-btn">
-          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M6 6h12v12H6z"/></svg>
-          <span>Parar</span>
-        </button>
-      </div>
-      <div class="caderno-tts-settings">
-        <label>Velocidade:
-          <input type="range" id="tts-speed" min="0.5" max="2" step="0.1" value="1">
-          <span id="tts-speed-label">1.0x</span>
-        </label>
-        <label>Volume:
-          <input type="range" id="tts-volume" min="0" max="1" step="0.1" value="1">
-          <span id="tts-volume-label">100%</span>
-        </label>
-      </div>
-      <div id="tts-status" class="caderno-tts-status">Selecione resumos para ler (✅ no card).</div>
-    </div>
   `;
 
   function norm2(s) { return (s || '').trim().toLowerCase(); }
@@ -189,7 +155,46 @@ function renderCaderno(view) {
           <h2 style="margin:2px 0 0;font-size:19px;">${escapeHtml(topicoNode ? topicoNode.nome : 'Todos os tópicos')}</h2>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <button class="btn btn-sm" id="caderno-btn-tts" title="Selecione resumos e ouça a leitura em voz alta">🔊 Ler em voz alta</button>
+          <!-- Botão 🔊 com dropdown de controles TTS -->
+          <div class="tts-dropdown-wrap" id="tts-dropdown-wrap" style="position:relative;">
+            <button class="btn btn-sm" id="caderno-btn-tts" title="Ler resumos em voz alta" style="display:flex;align-items:center;gap:6px;">
+              <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+              <span id="tts-btn-label">Áudio</span>
+              <svg viewBox="0 0 24 24" width="12" height="12" id="tts-chevron"><path fill="currentColor" d="M7 10l5 5 5-5z"/></svg>
+            </button>
+            <div class="tts-dropdown" id="caderno-tts-controls" hidden>
+              <div class="tts-dropdown-header">
+                <span>🔊 Leitor de Resumos</span>
+              </div>
+              <div class="tts-dropdown-row">
+                <button id="tts-btn-play" class="btn btn-sm tts-btn-play">
+                  <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
+                  Ler
+                </button>
+                <button id="tts-btn-pause" class="btn btn-sm tts-btn-ctrl" hidden>
+                  <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+                  Pausar
+                </button>
+                <button id="tts-btn-stop" class="btn btn-sm tts-btn-ctrl">
+                  <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6 6h12v12H6z"/></svg>
+                  Parar
+                </button>
+              </div>
+              <div class="tts-dropdown-sliders">
+                <label>
+                  <svg viewBox="0 0 24 24" width="13" height="13" title="Velocidade"><path fill="currentColor" d="M13 2.05v2.02c3.95.49 7 3.85 7 7.93 0 3.21-1.81 6-4.72 7.72L13 18v3c4.35-1 9-5 9-10.02C22 5.92 18 1.96 13 2.05zM11 2.06C7.72 2.46 5 4.45 3.61 7.13L5.4 8.1C6.4 6.07 8.56 4.6 11 4.08V2.06zM3.6 16.87C5 19.55 7.72 21.54 11 21.94v-2.02c-2.44-.52-4.6-1.99-5.6-4.02l-1.8.97zM3.01 12c0 1.05.18 2.06.51 3l1.86-1.03C5.14 13.36 5 12.7 5 12c0-.7.14-1.36.38-1.97L3.52 9C3.18 9.94 3 10.95 3 12z"/></svg>
+                  <input type="range" id="tts-speed" min="0.5" max="2" step="0.1" value="1" style="flex:1;width:80px;">
+                  <span id="tts-speed-label">1.0x</span>
+                </label>
+                <label>
+                  <svg viewBox="0 0 24 24" width="13" height="13" title="Volume"><path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+                  <input type="range" id="tts-volume" min="0" max="1" step="0.1" value="1" style="flex:1;width:80px;">
+                  <span id="tts-volume-label">100%</span>
+                </label>
+              </div>
+              <div id="tts-status" class="tts-dropdown-status">Selecione resumos para ler (✅ no card).</div>
+            </div>
+          </div>
           <button class="btn btn-primary btn-sm" id="btn-nova-anotacao-caderno">✏️ Nova Anotação</button>
           <input type="text" id="caderno-busca" class="search-input" style="max-width:220px;" placeholder="🔍 Buscar nos resumos..." value="${escapeHtml(_cadernoBusca)}">
         </div>
@@ -431,19 +436,28 @@ function renderCaderno(view) {
     });
   }
 
-  // Botão "Ler em voz alta" no header — abre painel ou avisa se não suportado
-  $('#caderno-btn-tts')?.addEventListener('click', () => {
+  // Botão 🔊 — abre/fecha dropdown
+  $('#caderno-btn-tts')?.addEventListener('click', (e) => {
+    e.stopPropagation();
     if (!_tts) { showToast('Leitura em voz alta não suportada neste navegador.', 'danger'); return; }
     const painel = $('#caderno-tts-controls');
-    if (painel) painel.hidden = !painel.hidden;
+    if (!painel) return;
+    const abrindo = painel.hidden;
+    painel.hidden = !abrindo;
+    const chevron = $('#tts-chevron');
+    if (chevron) chevron.style.transform = abrindo ? 'rotate(180deg)' : '';
   });
 
-  // Fechar painel
-  $('#tts-btn-fechar')?.addEventListener('click', () => {
-    const painel = $('#caderno-tts-controls'); if (painel) painel.hidden = true;
-    _tts?.parar();
-    atualizarEstadoTTS('Selecione resumos para ler (✅ no card).');
-  });
+  // Fechar dropdown ao clicar fora
+  document.addEventListener('click', (e) => {
+    const wrap = $('#tts-dropdown-wrap');
+    if (wrap && !wrap.contains(e.target)) {
+      const painel = $('#caderno-tts-controls');
+      if (painel) painel.hidden = true;
+      const chevron = $('#tts-chevron');
+      if (chevron) chevron.style.transform = '';
+    }
+  }, { capture: false });
 
   // Play — lê todos os resumos com checkbox marcado
   $('#tts-btn-play')?.addEventListener('click', () => {
