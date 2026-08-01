@@ -195,7 +195,11 @@ async function gerarResumoTeoricoIA(item) {
 
 function _htmlConteudoCaderno(item) {
   return `
-    <div style="line-height:1.7;font-size:14px;color:var(--text);">${_mdParaHtml(item.conteudoBruto)}</div>
+    <div class="revisao-texto-preview" id="revisao-texto-preview"
+         style="line-height:1.7;font-size:14px;color:var(--text);">${_mdParaHtml(item.conteudoBruto)}</div>
+    <textarea class="revisao-textarea" id="revisao-textarea" style="display:none;"
+      rows="14">${escapeHtml(item.conteudoBruto || '')}</textarea>
+
     ${item.conteudoCondensado ? `<div style="border-left:3px solid var(--gold);padding:10px 12px;margin-top:16px;color:var(--text-muted);font-size:13px;">
       📎 ${escapeHtml(item.conteudoCondensado)}
     </div>` : ''}
@@ -203,15 +207,51 @@ function _htmlConteudoCaderno(item) {
       <summary style="cursor:pointer;font-size:12.5px;color:var(--primary);font-weight:600;">📋 Enunciado original da questão</summary>
       <div style="white-space:pre-wrap;font-size:12.5px;color:var(--text-muted);padding:10px;background:var(--surface-2);border-radius:6px;margin-top:6px;">${escapeHtml(item.enunciado)}</div>
     </details>` : ''}
+
+    <div class="revisao-acoes-editar" style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+      <button class="btn btn-sm btn-outline" id="btn-editar-resumo">✏️ Editar resumo</button>
+      <button class="btn btn-sm" id="btn-salvar-edicao" style="display:none;">💾 Salvar edição</button>
+      <button class="btn btn-sm btn-ghost" id="btn-cancelar-edicao" style="display:none;">Cancelar</button>
+      <button class="btn btn-sm btn-outline" id="btn-pedir-mais-ia">✨ Pedir mais conteúdo à IA</button>
+    </div>
+    <div id="revisao-mais-ia-wrap" style="display:none;margin-top:14px;">
+      <textarea id="revisao-mais-ia-prompt" class="revisao-textarea" rows="3"
+        placeholder="O que você quer aprofundar? Ex: Explique melhor as imunidades tributárias, adicione exemplos práticos, crie um mnemônico..."></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn btn-sm btn-primary" id="btn-enviar-mais-ia">✨ Enviar para a IA</button>
+        <button class="btn btn-sm btn-ghost" id="btn-cancelar-mais-ia">Cancelar</button>
+      </div>
+      <div id="revisao-mais-ia-resultado" style="display:none;margin-top:12px;"></div>
+    </div>
   `;
 }
 
 function _htmlConteudoTeorico(item) {
   return `
-    <div style="line-height:1.7;font-size:14px;color:var(--text);">${_mdParaHtml(item.conteudoBruto)}</div>
+    <div class="revisao-texto-preview" id="revisao-texto-preview"
+         style="line-height:1.7;font-size:14px;color:var(--text);">${_mdParaHtml(item.conteudoBruto)}</div>
+    <textarea class="revisao-textarea" id="revisao-textarea" style="display:none;"
+      rows="14">${escapeHtml(item.conteudoBruto || '')}</textarea>
+
     ${item.conteudoCondensado ? `<div style="border-left:3px solid var(--gold);padding:12px 12px 12px 16px;margin-top:16px;color:var(--text);font-size:13px;background:var(--surface-2);border-radius:6px;">
       ${_mdParaHtml(item.conteudoCondensado)}
     </div>` : ''}
+
+    <div class="revisao-acoes-editar" style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+      <button class="btn btn-sm btn-outline" id="btn-editar-resumo">✏️ Editar resumo</button>
+      <button class="btn btn-sm" id="btn-salvar-edicao" style="display:none;">💾 Salvar edição</button>
+      <button class="btn btn-sm btn-ghost" id="btn-cancelar-edicao" style="display:none;">Cancelar</button>
+      <button class="btn btn-sm btn-outline" id="btn-pedir-mais-ia">✨ Pedir mais conteúdo à IA</button>
+    </div>
+    <div id="revisao-mais-ia-wrap" style="display:none;margin-top:14px;">
+      <textarea id="revisao-mais-ia-prompt" class="revisao-textarea" rows="3"
+        placeholder="O que você quer aprofundar? Ex: Adicione exemplos práticos, crie um mnemônico, compare com outro conceito..."></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn btn-sm btn-primary" id="btn-enviar-mais-ia">✨ Enviar para a IA</button>
+        <button class="btn btn-sm btn-ghost" id="btn-cancelar-mais-ia">Cancelar</button>
+      </div>
+      <div id="revisao-mais-ia-resultado" style="display:none;margin-top:12px;"></div>
+    </div>
   `;
 }
 
@@ -320,6 +360,183 @@ function renderRevisao(view) {
   // Listeners
   $('#btn-li-e-entendi')?.addEventListener('click', () => _avancar(view, item, true));
   $('#btn-pular-revisao')?.addEventListener('click', () => _avancar(view, item, false));
+
+  // ── Edição inline ────────────────────────────────────────────
+  $('#btn-editar-resumo')?.addEventListener('click', () => {
+    const preview = $('#revisao-texto-preview');
+    const textarea = $('#revisao-textarea');
+    const btnEditar = $('#btn-editar-resumo');
+    const btnSalvar = $('#btn-salvar-edicao');
+    const btnCancelar = $('#btn-cancelar-edicao');
+    if (!preview || !textarea) return;
+    preview.style.display = 'none';
+    textarea.style.display = 'block';
+    textarea.value = item.conteudoBruto || '';
+    textarea.focus();
+    btnEditar.style.display = 'none';
+    btnSalvar.style.display = 'inline-flex';
+    btnCancelar.style.display = 'inline-flex';
+  });
+
+  $('#btn-cancelar-edicao')?.addEventListener('click', () => {
+    $('#revisao-texto-preview').style.display = 'block';
+    $('#revisao-textarea').style.display = 'none';
+    $('#btn-editar-resumo').style.display = 'inline-flex';
+    $('#btn-salvar-edicao').style.display = 'none';
+    $('#btn-cancelar-edicao').style.display = 'none';
+  });
+
+  $('#btn-salvar-edicao')?.addEventListener('click', async () => {
+    const novoTexto = $('#revisao-textarea')?.value?.trim();
+    if (!novoTexto) { showToast('O resumo não pode ficar vazio.', 'danger'); return; }
+
+    item.conteudoBruto = novoTexto;
+
+    // Persiste no Caderno de Resumos
+    if (item.resumoId) {
+      const todos = await db.resumos.getAll();
+      const resumo = todos.find(r => r.id === item.resumoId);
+      if (resumo) {
+        resumo.textoBruto = novoTexto;
+        await db.resumos.update(resumo);
+      }
+    } else {
+      // Sem resumoId ainda (teórico recém-gerado antes de salvar): salva agora
+      const novoId = await db.resumos.add({
+        materia: item.materia, topico: item.topico || null,
+        data: todayISO(), textoBruto: novoTexto,
+        textoCondensado: item.conteudoCondensado || null,
+        tentativaId: null, enunciado: null,
+        enviadoAnki: false, ankiDeck: null, origemRevisao: true
+      });
+      item.resumoId = novoId;
+    }
+
+    await reloadState();
+    showToast('Resumo salvo! ✓', 'success');
+
+    // Atualiza preview sem re-renderizar a tela toda
+    const preview = $('#revisao-texto-preview');
+    if (preview) preview.innerHTML = _mdParaHtml(novoTexto);
+    $('#revisao-texto-preview').style.display = 'block';
+    $('#revisao-textarea').style.display = 'none';
+    $('#btn-editar-resumo').style.display = 'inline-flex';
+    $('#btn-salvar-edicao').style.display = 'none';
+    $('#btn-cancelar-edicao').style.display = 'none';
+  });
+
+  // ── Pedir mais conteúdo à IA ─────────────────────────────────
+  $('#btn-pedir-mais-ia')?.addEventListener('click', () => {
+    const wrap = $('#revisao-mais-ia-wrap');
+    if (wrap) { wrap.style.display = wrap.style.display === 'none' ? 'block' : 'none'; }
+    $('#revisao-mais-ia-prompt')?.focus();
+  });
+
+  $('#btn-cancelar-mais-ia')?.addEventListener('click', () => {
+    $('#revisao-mais-ia-wrap').style.display = 'none';
+    $('#revisao-mais-ia-resultado').style.display = 'none';
+  });
+
+  $('#btn-enviar-mais-ia')?.addEventListener('click', async () => {
+    if (typeof window.chamarGeminiResumoStream !== 'function' &&
+        typeof window.chamarGeminiResumo !== 'function') {
+      showToast('IA não configurada. Acesse Configurações → Resolver com IA.', 'danger');
+      return;
+    }
+    const pedido = $('#revisao-mais-ia-prompt')?.value?.trim();
+    if (!pedido) { showToast('Descreva o que quer aprofundar.', 'danger'); return; }
+
+    const btnEnviar = $('#btn-enviar-mais-ia');
+    if (btnEnviar) { btnEnviar.disabled = true; btnEnviar.textContent = '⏳ Gerando…'; }
+
+    const resultado = $('#revisao-mais-ia-resultado');
+    if (resultado) {
+      resultado.style.display = 'block';
+      resultado.innerHTML = `<div style="color:var(--text-muted);font-size:13px;">⏳ Aguardando IA…</div>`;
+    }
+
+    try {
+      const prompt = `Você é um professor de concursos. O aluno está revisando "${item.disciplina}"${item.topico ? ` — tópico: ${item.topico}` : ''}.
+
+RESUMO ATUAL:
+${item.conteudoBruto || '(sem resumo ainda)'}
+
+PEDIDO DO ALUNO:
+${pedido}
+
+Responda com conteúdo adicional relevante, em linguagem de caderno de estudos. Use **negrito** para termos importantes, listas quando necessário. Seja direto e denso — o aluno já leu o resumo acima.`;
+
+      let textoGerado = '';
+
+      if (typeof window.chamarGeminiResumoStream === 'function') {
+        await window.chamarGeminiResumoStream(prompt, (acumulado) => {
+          if (resultado) resultado.innerHTML = `
+            <div style="line-height:1.7;font-size:14px;color:var(--text);
+                        border-left:3px solid var(--primary);padding-left:12px;">
+              ${_mdParaHtml(acumulado)}
+            </div>`;
+          textoGerado = acumulado;
+        });
+      } else {
+        textoGerado = await window.chamarGeminiResumo(prompt);
+        if (resultado) resultado.innerHTML = `
+          <div style="line-height:1.7;font-size:14px;color:var(--text);
+                      border-left:3px solid var(--primary);padding-left:12px;">
+            ${_mdParaHtml(textoGerado)}
+          </div>`;
+      }
+
+      // Oferece incorporar ao resumo principal
+      if (textoGerado && resultado) {
+        resultado.innerHTML += `
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+            <button class="btn btn-sm btn-outline" id="btn-incorporar-ia">
+              📎 Incorporar ao resumo principal
+            </button>
+          </div>`;
+
+        $('#btn-incorporar-ia')?.addEventListener('click', async () => {
+          const separador = '\n\n---\n\n';
+          item.conteudoBruto = (item.conteudoBruto || '') + separador + textoGerado;
+
+          if (item.resumoId) {
+            const todos = await db.resumos.getAll();
+            const resumo = todos.find(r => r.id === item.resumoId);
+            if (resumo) {
+              resumo.textoBruto = item.conteudoBruto;
+              await db.resumos.update(resumo);
+            }
+          } else {
+            const novoId = await db.resumos.add({
+              materia: item.materia, topico: item.topico || null,
+              data: todayISO(), textoBruto: item.conteudoBruto,
+              textoCondensado: item.conteudoCondensado || null,
+              tentativaId: null, enunciado: null,
+              enviadoAnki: false, ankiDeck: null, origemRevisao: true
+            });
+            item.resumoId = novoId;
+          }
+
+          await reloadState();
+          const preview = $('#revisao-texto-preview');
+          if (preview) preview.innerHTML = _mdParaHtml(item.conteudoBruto);
+          const textarea = $('#revisao-textarea');
+          if (textarea) textarea.value = item.conteudoBruto;
+          showToast('Conteúdo incorporado e salvo no Caderno! 📓', 'success');
+          $('#btn-incorporar-ia').textContent = '✓ Incorporado!';
+          $('#btn-incorporar-ia').disabled = true;
+        });
+      }
+
+      if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.textContent = '✨ Enviar para a IA'; }
+      $('#revisao-mais-ia-prompt').value = '';
+
+    } catch (err) {
+      showToast(err.message || 'Erro ao consultar IA.', 'danger');
+      if (resultado) resultado.innerHTML = `<div style="color:var(--danger);font-size:13px;">❌ ${escapeHtml(err.message)}</div>`;
+      if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.textContent = '✨ Enviar para a IA'; }
+    }
+  });
 
   if (item.tipo === 'teorico' && !item.gerado) {
     $('#btn-gerar-teoria')?.addEventListener('click', async () => {

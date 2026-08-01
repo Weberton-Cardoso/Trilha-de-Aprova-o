@@ -1,0 +1,48 @@
+/* ===== REVISÃO — Edição inline e Pedir mais IA ===== */
+
+.revisao-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 6px;
+  font-size: 13.5px;
+  font-family: inherit;
+  line-height: 1.7;
+  resize: vertical;
+  min-height: 200px;
+  transition: border-color 0.15s;
+}
+
+.revisao-textarea:focus {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(139, 124, 246, 0.15);
+}
+
+.revisao-acoes-editar {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+#revisao-mais-ia-wrap {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-top: 14px;
+}
+
+#revisao-mais-ia-resultado {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px;
+}
