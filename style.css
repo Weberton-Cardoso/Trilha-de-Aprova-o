@@ -1060,3 +1060,33 @@ tr.row-motivo td{ padding-top:0; padding-bottom:8px; border-top:none; }
     max-width: 320px;
   }
 }
+
+/* ══════════════════════════════════════════════════════════
+   BÚSSOLA DO EDITAL — visão verticalizada com status automático
+══════════════════════════════════════════════════════════ */
+.bussola-disc{
+  transition:box-shadow .15s;
+}
+.bussola-disc:hover{
+  box-shadow:0 0 0 1px var(--border);
+}
+.bussola-disc-header{
+  display:flex; align-items:center; gap:12px;
+  padding:2px 0;
+}
+.bussola-chev{
+  transition:transform .2s; flex-shrink:0; color:var(--text-muted);
+}
+.bussola-chev.open{ transform:rotate(180deg); }
+
+.bussola-topicos{ display:flex; flex-direction:column; gap:8px; }
+.bussola-topico{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:10px 12px; border-radius:8px; background:var(--surface-2);
+  border-left:3px solid var(--border);
+}
+
+@media(max-width:640px){
+  .bussola-topico{ flex-direction:column; align-items:flex-start; }
+  .bussola-disc-header{ flex-wrap:wrap; }
+}
