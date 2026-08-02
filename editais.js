@@ -826,9 +826,17 @@ function renderEditalDetalhe(view, idStr) {
               </svg>
               <div style="flex:1;min-width:0;">
                 <div style="font-size:15px;font-weight:700;font-family:var(--font-display);">${escapeHtml(m.nome)}</div>
-                <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">
-                  ${discStats.coberto}/${discStats.total} tópicos cobertos
-                  ${discStats.taxa != null ? ` · taxa média ${taxaDisc}` : ''}
+                <div style="font-size:12px;color:var(--text-muted);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                  <span>${discStats.coberto}/${discStats.total} tópicos cobertos${discStats.taxa != null ? ` · taxa média ${taxaDisc}` : ''}</span>
+                  ${(() => {
+                    const mc = _resolverMateriaCiclo(m);
+                    if (!mc) return `<span class="bussola-ciclo-vinculo sem-vinculo" data-vincular-mi="${mi}" title="Vincular ao Ciclo de Estudos">⬡ sem vínculo com ciclo</span>`;
+                    const auto = !m.cicloMateriaId;
+                    const tempo = _formatarMinutos(mc.minutosFeitos || 0);
+                    return `<span class="bussola-ciclo-vinculo com-vinculo" data-vincular-mi="${mi}" title="${auto ? 'Vínculo automático com ciclo (clique para alterar)' : 'Clique para alterar vínculo'}">
+                      ⏱️ ${escapeHtml(mc.nome)} · ${tempo}${auto ? ' <small style="opacity:.7">(auto)</small>' : ''}
+                    </span>`;
+                  })()}
                 </div>
               </div>
             </div>
@@ -900,6 +908,79 @@ function renderEditalDetalhe(view, idStr) {
       });
     });
 
+    // Vincular / alterar vínculo com matéria do ciclo
+    $$('[data-vincular-mi]', lista).forEach(el => {
+      el.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const mi = Number(el.dataset.vincularMi);
+        const matEdital = edital.materias[mi];
+        const cicloMaterias = state.cicloMaterias || [];
+
+        if (!cicloMaterias.length) {
+          showToast('Você não tem matérias cadastradas em nenhum Ciclo de Estudos.', '');
+          return;
+        }
+
+        // Abre modal de seleção com score de similaridade
+        const candidatos = cicloMaterias
+          .map(m => ({ m, score: _calcScoreSimilaridade(matEdital.nome, m.nome) }))
+          .sort((a, b) => b.score - a.score);
+
+        const cicloNomeMap = new Map(
+          state.ciclos.map(c => [c.id, c.nome])
+        );
+
+        const opcoesHtml = candidatos.map(({ m, score }) => {
+          const cicloNome = cicloNomeMap.get(m.cicloId) || '';
+          const tempoTxt  = _formatarMinutos(m.minutosFeitos || 0);
+          const scoreBar  = score >= 0.5 ? `<span style="color:var(--gold);font-size:11px;margin-left:4px;">★ ${Math.round(score * 100)}% de semelhança</span>` : '';
+          const isAtual   = matEdital.cicloMateriaId === m.id ||
+                            (!matEdital.cicloMateriaId && score >= 0.5 && candidatos[0].m.id === m.id);
+          return `
+            <label style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:8px;cursor:pointer;border:1px solid ${isAtual ? 'var(--gold)' : 'var(--border)'};background:${isAtual ? 'var(--gold-soft)' : 'var(--surface)'};margin-bottom:8px;">
+              <input type="radio" name="ciclo-vinculo" value="${m.id}" ${isAtual ? 'checked' : ''} style="accent-color:var(--gold);">
+              <div style="flex:1;">
+                <div style="font-weight:600;font-size:13.5px;">${escapeHtml(m.nome)}</div>
+                <div style="font-size:12px;color:var(--text-muted);">${cicloNome ? escapeHtml(cicloNome) + ' · ' : ''}⏱️ ${tempoTxt}${scoreBar}</div>
+              </div>
+            </label>`;
+        }).join('');
+
+        const mc = _resolverMateriaCiclo(matEdital);
+
+        openModal(`
+          <h2>🔗 Vincular "${escapeHtml(matEdital.nome)}" ao Ciclo</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:0;">
+            Selecione qual matéria do seu Ciclo de Estudos corresponde a esta disciplina do edital.
+            O vínculo permite exibir o tempo estudado e sincronizar o progresso.
+          </p>
+          <div style="max-height:320px;overflow-y:auto;padding-right:4px;">
+            ${opcoesHtml}
+            <label style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:8px;cursor:pointer;border:1px solid var(--border);background:var(--surface);margin-bottom:8px;">
+              <input type="radio" name="ciclo-vinculo" value="__nenhum__" ${!mc ? 'checked' : ''} style="accent-color:var(--gold);">
+              <div><div style="font-weight:600;font-size:13.5px;color:var(--text-muted);">Sem vínculo</div><div style="font-size:12px;color:var(--text-faint);">Não mostrar tempo do ciclo para esta disciplina</div></div>
+            </label>
+          </div>
+          <div class="modal-actions" style="margin-top:16px;">
+            <button class="btn btn-ghost" id="btn-vincular-cancelar">Cancelar</button>
+            <button class="btn btn-primary" id="btn-vincular-salvar">Salvar vínculo</button>
+          </div>
+        `);
+
+        $('#btn-vincular-cancelar')?.addEventListener('click', closeModal);
+        $('#btn-vincular-salvar')?.addEventListener('click', async () => {
+          const selecionado = document.querySelector('input[name="ciclo-vinculo"]:checked')?.value;
+          if (!selecionado) return;
+          matEdital.cicloMateriaId = selecionado === '__nenhum__' ? null : Number(selecionado);
+          await db.editais.update(edital);
+          await reloadState();
+          closeModal();
+          showToast(selecionado === '__nenhum__' ? 'Vínculo removido.' : 'Vínculo salvo! ✓', 'success');
+          desenharLista();
+        });
+      });
+    });
+
     // Botão Estudar → navega pro Ciclo com a disciplina pré-selecionada
     $$('[data-estudar-mi]', lista).forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -944,14 +1025,79 @@ function renderEditalDetalhe(view, idStr) {
   }
 }
 
+/* ============================================================
+   MATCHING EDITAL ↔ CICLO
+   Tenta vincular automaticamente uma disciplina do edital a uma
+   matéria do ciclo de estudos usando quatro estratégias em cascata:
+   1. Vínculo manual já salvo no edital (cicloMateriaId)
+   2. Nome normalizado idêntico
+   3. Um nome contém o outro (e.g. "AFO" dentro de "Administração
+      Financeira e Orçamentária")
+   4. Sigla: iniciais das palavras principais (≥4 letras) formam a sigla
+   5. Maior interseção de palavras-chave (≥ 50% de coincidência)
+   ============================================================ */
+
+function _extrairSigla(nome) {
+  return _norm(nome)
+    .split(/\s+/)
+    .filter(w => w.length >= 4 && !/^(de|da|do|das|dos|e|em|por|para|com|sem|que|uma|uns|umas|os|as|no|na|nos|nas|ao|aos|pelo|pela|pelos|pelas)$/.test(w))
+    .map(w => w[0])
+    .join('');
+}
+
+function _calcScoreSimilaridade(a, b) {
+  const na = _norm(a), nb = _norm(b);
+  if (na === nb) return 1;
+  if (na.includes(nb) || nb.includes(na)) return 0.9;
+
+  // Sigla: verifica se um é a sigla do outro
+  const siglaA = _extrairSigla(a), siglaB = _extrairSigla(b);
+  if (siglaA === nb || siglaB === na || siglaA === siglaB) return 0.85;
+
+  // Palavras-chave em comum (≥ 4 letras, sem stopwords)
+  const stopwords = new Set(['de','da','do','das','dos','e','em','por','para','com','sem','ao','no','na']);
+  const palavrasA = na.split(/\s+/).filter(w => w.length >= 4 && !stopwords.has(w));
+  const palavrasB = nb.split(/\s+/).filter(w => w.length >= 4 && !stopwords.has(w));
+  if (!palavrasA.length || !palavrasB.length) return 0;
+  const comuns = palavrasA.filter(w => palavrasB.includes(w)).length;
+  return comuns / Math.max(palavrasA.length, palavrasB.length);
+}
+
+/**
+ * Dado uma matéria do edital, retorna a matéria do ciclo mais provável.
+ * Usa vínculo manual salvo (cicloMateriaId) ou matching automático por score.
+ * Retorna null se não encontrar nada com score >= 0.5.
+ */
+function _resolverMateriaCiclo(materiaEdital) {
+  if (!materiaEdital) return null;
+  const cicloMaterias = state.cicloMaterias || [];
+  if (!cicloMaterias.length) return null;
+
+  // 1. Vínculo manual salvo
+  if (materiaEdital.cicloMateriaId) {
+    const vinculada = cicloMaterias.find(m => m.id === materiaEdital.cicloMateriaId);
+    if (vinculada) return vinculada;
+  }
+
+  // 2. Matching automático por score
+  let melhor = null, melhorScore = 0;
+  for (const m of cicloMaterias) {
+    const score = _calcScoreSimilaridade(materiaEdital.nome, m.nome);
+    if (score > melhorScore) { melhorScore = score; melhor = m; }
+  }
+  return melhorScore >= 0.5 ? melhor : null;
+}
+
 function renderKanbanCard(t, mi, ti, stats) {
   const marcado = t.status === 'dominado';
   const pct = stats ? stats.taxa : 0;
-  
-  // Buscar conexão com Ciclo de Estudos (por nome normalizado)
-  const materiasCiclo = state.ciclos.flatMap(c => c.materias || []);
-  const materiaCiclo = materiasCiclo.find(m => _norm(m.nome) === _norm(edital.materias[mi]?.nome));
-  const tempoEstudado = materiaCiclo ? _formatarMinutos(materiaCiclo.minutosFeitos || 0) : '—';
+
+  // Busca a matéria vinculada ao ciclo usando a lógica de matching inteligente.
+  // Prioridade: vínculo manual salvo → matching automático por nome.
+  const materiaCiclo = _resolverMateriaCiclo(edital.materias[mi]);
+  const tempoEstudado = materiaCiclo
+    ? _formatarMinutos(materiaCiclo.minutosFeitos || 0)
+    : null;
   
   return `
     <div class="kanban-card status-${t.status}" draggable="true" data-mi="${mi}" data-ti="${ti}" data-ordem="${t.ordem || ti}">
@@ -971,7 +1117,7 @@ function renderKanbanCard(t, mi, ti, stats) {
         </span>
         ${stats ? `<span class="kb-badge" title="Tentativas registradas"><svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M4 4h16v12H7l-3 3V4z"/></svg> ${stats.tentativas}</span>` : ''}
         ${stats ? `<span class="kb-badge kb-badge-pct" title="Taxa de acertos">${fmtPct(pct)}</span>` : ''}
-        ${materiaCiclo ? `<span class="kb-badge kb-badge-tempo" title="Tempo estudado no Ciclo">⏱️ ${tempoEstudado}</span>` : ''}
+        ${materiaCiclo ? `<span class="kb-badge kb-badge-tempo" title="Tempo estudado no Ciclo: ${materiaCiclo.nome}">⏱️ ${tempoEstudado}</span>` : ''}
       </div>
       <div class="kanban-card-detalhe" id="kb-detalhe-${mi}-${ti}" hidden>
         <select class="kanban-status-select" data-mi="${mi}" data-ti="${ti}">

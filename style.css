@@ -1090,3 +1090,22 @@ tr.row-motivo td{ padding-top:0; padding-bottom:8px; border-top:none; }
   .bussola-topico{ flex-direction:column; align-items:flex-start; }
   .bussola-disc-header{ flex-wrap:wrap; }
 }
+
+/* ---- Vínculo Edital ↔ Ciclo ---- */
+.bussola-ciclo-vinculo {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px; padding: 2px 8px; border-radius: 999px;
+  cursor: pointer; transition: background .15s;
+  pointer-events: all; /* garante que o clique não propaga pra toggle-disc */
+}
+.bussola-ciclo-vinculo.com-vinculo {
+  background: rgba(232,177,77,.12); color: var(--gold);
+  border: 1px solid rgba(232,177,77,.3);
+}
+.bussola-ciclo-vinculo.sem-vinculo {
+  background: var(--surface-2); color: var(--text-faint);
+  border: 1px dashed var(--border);
+}
+.bussola-ciclo-vinculo:hover {
+  filter: brightness(1.15);
+}
