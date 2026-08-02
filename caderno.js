@@ -76,10 +76,14 @@ function renderCaderno(view) {
     </div>
   `;
 
-  // Injeta o dropdown TTS UMA VEZ na view (fora do caderno-main que é re-renderizado)
-  const _ttsWrap = document.createElement('div');
-  _ttsWrap.innerHTML = `
-    <div class="tts-dropdown" id="caderno-tts-controls" hidden>
+  // Dropdown TTS: appended no body para evitar qualquer re-renderização
+  // Verifica se já existe (navegação entre telas pode chamar renderCaderno de novo)
+  if (!document.getElementById('caderno-tts-controls')) {
+    const _ttsEl = document.createElement('div');
+    _ttsEl.className = 'tts-dropdown';
+    _ttsEl.id = 'caderno-tts-controls';
+    _ttsEl.hidden = true;
+    _ttsEl.innerHTML = `
       <div class="tts-dropdown-header">🔊 Leitor de Resumos</div>
       <div class="tts-dropdown-row">
         <button id="tts-btn-play" class="btn btn-sm tts-btn-play">
@@ -108,9 +112,9 @@ function renderCaderno(view) {
         </label>
       </div>
       <div id="tts-status" class="tts-dropdown-status">Selecione resumos para ler (✅ no card).</div>
-    </div>
-  `;
-  view.appendChild(_ttsWrap.firstElementChild);
+    `;
+    document.body.appendChild(_ttsEl);
+  }
 
   function norm2(s) { return (s || '').trim().toLowerCase(); }
 
@@ -191,13 +195,11 @@ function renderCaderno(view) {
           <h2 style="margin:2px 0 0;font-size:19px;">${escapeHtml(topicoNode ? topicoNode.nome : 'Todos os tópicos')}</h2>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <div class="tts-dropdown-wrap" id="tts-dropdown-wrap" style="position:relative;">
-            <button class="btn btn-sm" id="caderno-btn-tts" title="Ler resumos em voz alta" style="display:flex;align-items:center;gap:6px;">
-              <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
-              <span>Áudio</span>
-              <svg viewBox="0 0 24 24" width="12" height="12" id="tts-chevron"><path fill="currentColor" d="M7 10l5 5 5-5z"/></svg>
-            </button>
-          </div>
+          <button class="btn btn-sm" id="caderno-btn-tts" title="Ler resumos em voz alta" style="display:flex;align-items:center;gap:6px;">
+            <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+            <span>Áudio</span>
+            <svg viewBox="0 0 24 24" width="12" height="12" id="tts-chevron"><path fill="currentColor" d="M7 10l5 5 5-5z"/></svg>
+          </button>
           <button class="btn btn-primary btn-sm" id="btn-nova-anotacao-caderno">✏️ Nova Anotação</button>
           <input type="text" id="caderno-busca" class="search-input" style="max-width:220px;" placeholder="🔍 Buscar nos resumos..." value="${escapeHtml(_cadernoBusca)}">
         </div>
@@ -439,38 +441,51 @@ function renderCaderno(view) {
     });
   }
 
-  // Botão 🔊 — abre/fecha dropdown (que agora vive na view, fora do caderno-main)
+  // ── Botão 🔊 Áudio — toggle dropdown ──────────────────────
+  // O botão fica no main.innerHTML mas o dropdown no body, então
+  // usamos delegação de evento no document para fechar ao clicar fora.
+  const _fecharTTSDropdown = () => {
+    const p = document.getElementById('caderno-tts-controls');
+    if (p && !p.hidden) {
+      p.hidden = true;
+      const ch = document.getElementById('tts-chevron');
+      if (ch) ch.style.transform = '';
+    }
+  };
+
+  // Registra o listener de fechar NO DOCUMENT uma única vez por renderização
+  // usando AbortController para remover quando a view for desmontada
+  const _ttsAbort = new AbortController();
+  document.addEventListener('click', (e) => {
+    const btn = document.getElementById('caderno-btn-tts');
+    if (btn && btn.contains(e.target)) return; // clique no próprio botão — deixa o toggle cuidar
+    _fecharTTSDropdown();
+  }, { signal: _ttsAbort.signal });
+
+  // Quando o usuário sair do Caderno (hash change), remove o listener e o dropdown
+  window.addEventListener('hashchange', () => {
+    _ttsAbort.abort();
+    _fecharTTSDropdown();
+    const p = document.getElementById('caderno-tts-controls');
+    if (p) p.remove();
+  }, { once: true });
+
   $('#caderno-btn-tts')?.addEventListener('click', (e) => {
     e.stopPropagation();
     if (!_tts) { showToast('Leitura em voz alta não suportada neste navegador.', 'danger'); return; }
-    const painel = $('#caderno-tts-controls');
-    const btn = $('#caderno-btn-tts');
-    if (!painel || !btn) return;
+    const painel = document.getElementById('caderno-tts-controls');
+    const btn = e.currentTarget;
+    if (!painel) return;
     const abrindo = painel.hidden;
-    painel.hidden = !abrindo;
-    // Posiciona o dropdown colado abaixo do botão
     if (abrindo) {
+      // Posiciona colado abaixo do botão usando coordenadas fixas
       const r = btn.getBoundingClientRect();
-      const vr = view.getBoundingClientRect();
-      painel.style.position = 'fixed';
-      painel.style.top = (r.bottom + 6) + 'px';
+      painel.style.top  = (r.bottom + 6) + 'px';
       painel.style.left = Math.max(8, r.right - 280) + 'px';
-      painel.style.zIndex = '500';
     }
-    const chevron = $('#tts-chevron');
-    if (chevron) chevron.style.transform = abrindo ? 'rotate(180deg)' : '';
-  });
-
-  // Fechar ao clicar fora — registrado na view, não no document
-  view.addEventListener('click', (e) => {
-    const btn = $('#caderno-btn-tts');
-    if (btn && btn.contains(e.target)) return;
-    const painel = $('#caderno-tts-controls');
-    if (painel && !painel.hidden) {
-      painel.hidden = true;
-      const chevron = $('#tts-chevron');
-      if (chevron) chevron.style.transform = '';
-    }
+    painel.hidden = !abrindo;
+    const ch = document.getElementById('tts-chevron');
+    if (ch) ch.style.transform = abrindo ? 'rotate(180deg)' : '';
   });
 
   // Play — lê todos os resumos com checkbox marcado
