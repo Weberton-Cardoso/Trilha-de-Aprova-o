@@ -472,6 +472,35 @@ function renderCicloPainelRoute(view, cicloId) {
     });
   });
 
+  // Ler sugestão vinda do Edital (botão "Estudar" no Kanban grava aqui)
+  try {
+    const sugestaoRaw = sessionStorage.getItem('ta_ciclo_sugestao');
+    if (sugestaoRaw && !settings.cicloSessaoAtiva) {
+      const sugestao = JSON.parse(sugestaoRaw);
+      sessionStorage.removeItem('ta_ciclo_sugestao'); // consome uma única vez
+
+      const norm = s => (s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const candidatos = materias.filter(m => {
+        const score = norm(m.nome).split(' ').filter(p => p.length > 3)
+          .filter(p => norm(sugestao.disciplina || '').includes(p)).length;
+        return score > 0 || norm(m.nome).includes(norm(sugestao.disciplina || '').slice(0, 6));
+      });
+      const materiaAlvo = candidatos[0];
+
+      if (materiaAlvo) {
+        settings.cicloSessaoAtiva = {
+          materiaId: materiaAlvo.id,
+          inicio: Date.now(),
+          topico: sugestao.topico || null
+        };
+        renderCicloPainelRoute(view, cicloId);
+        showToast(`Sessão iniciada: ${materiaAlvo.nome}${sugestao.topico ? ' — ' + sugestao.topico : ''}`, 'success');
+      } else {
+        showToast(`Disciplina do edital não encontrada no ciclo: "${sugestao.disciplina}". Inicie a sessão manualmente.`, '');
+      }
+    }
+  } catch (_) { /* sessionStorage pode não estar disponível */ }
+
   $$('[data-manual]', view).forEach(btn => {
     btn.addEventListener('click', async () => {
       const materia = state.cicloMaterias.find(m => m.id === Number(btn.dataset.manual));
