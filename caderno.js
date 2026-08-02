@@ -470,22 +470,31 @@ function renderCaderno(view) {
     if (p) p.remove();
   }, { once: true });
 
-  $('#caderno-btn-tts')?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (!_tts) { showToast('Leitura em voz alta não suportada neste navegador.', 'danger'); return; }
-    const painel = document.getElementById('caderno-tts-controls');
-    const btn = e.currentTarget;
-    if (!painel) return;
-    const abrindo = painel.hidden;
-    if (abrindo) {
-      // Posiciona colado abaixo do botão usando coordenadas fixas
-      const r = btn.getBoundingClientRect();
-      painel.style.top  = (r.bottom + 6) + 'px';
-      painel.style.left = Math.max(8, r.right - 280) + 'px';
+  // Delegação no view — funciona mesmo após renderMain() recriar o botão
+  view.addEventListener('click', (e) => {
+    const btnTts = e.target.closest('#caderno-btn-tts');
+    if (btnTts) {
+      if (!_tts) { showToast('Leitura em voz alta não suportada neste navegador.', 'danger'); return; }
+      const painel = document.getElementById('caderno-tts-controls');
+      if (!painel) return;
+      const abrindo = painel.hidden;
+      if (abrindo) {
+        const r = btnTts.getBoundingClientRect();
+        painel.style.top  = (r.bottom + 6) + 'px';
+        painel.style.left = Math.max(8, r.right - 280) + 'px';
+      }
+      painel.hidden = !abrindo;
+      const ch = document.getElementById('tts-chevron');
+      if (ch) ch.style.transform = abrindo ? 'rotate(180deg)' : '';
+      return;
     }
-    painel.hidden = !abrindo;
-    const ch = document.getElementById('tts-chevron');
-    if (ch) ch.style.transform = abrindo ? 'rotate(180deg)' : '';
+    // Clique fora do dropdown: fecha
+    const painel = document.getElementById('caderno-tts-controls');
+    if (painel && !painel.hidden && !painel.contains(e.target)) {
+      painel.hidden = true;
+      const ch = document.getElementById('tts-chevron');
+      if (ch) ch.style.transform = '';
+    }
   });
 
   // Play — lê todos os resumos com checkbox marcado
