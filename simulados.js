@@ -23,6 +23,7 @@ function renderSimulados(view) {
   view.innerHTML = `
     <div class="toolbar">
       <div class="text-muted">Registre seus simulados e acompanhe a evolução do aproveitamento.</div>
+      <button class="btn" id="btn-registrar-erro-simulado">📝 Registrar erro</button>
       <button class="btn btn-primary" id="btn-novo-simulado">
         <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
         Novo simulado
@@ -41,6 +42,9 @@ function renderSimulados(view) {
   `;
 
   $('#btn-novo-simulado').addEventListener('click', () => openSimuladoModal());
+  $('#btn-registrar-erro-simulado').addEventListener('click', () => {
+    if (typeof abrirModalRegistrarErro === 'function') abrirModalRegistrarErro({ origem: 'simulado' });
+  });
 
   if (lista.length) {
     const cronologico = [...lista].reverse();
