@@ -687,6 +687,21 @@ function renderDashboard(view) {
   const minutosTotalCiclo = (state.cicloSessoes || [])
     .reduce((soma, s) => soma + (Number(s && s.minutos) || 0), 0);
 
+  // Tempo da semana (últimos 7 dias do Ciclo de Estudos)
+  const inicioSemana = daysAgoISO(6);
+  const minutosSemanaCiclo = (state.cicloSessoes || [])
+    .filter(s => s && s.data && s.data >= inicioSemana)
+    .reduce((soma, s) => soma + (Number(s.minutos) || 0), 0);
+
+  // Questões por dia (últimos 7 dias) para o gráfico de barras
+  const ultimos7 = [];
+  for (let i = 6; i >= 0; i--) {
+    const iso = daysAgoISO(i);
+    const ts = state.tentativas.filter(t => t.data === iso);
+    const r = calcResumo(ts);
+    ultimos7.push({ iso, label: toBRDate(iso).slice(0, 5), certas: r.certas, erradas: r.erradas, brancos: r.brancos });
+  }
+
   view.innerHTML = `
     <div class="filter-bar" id="dash-filters">
       ${['hoje', '7d', '30d', '90d', 'custom'].map(t => `
@@ -711,6 +726,7 @@ function renderDashboard(view) {
       <div class="stat-card"><div class="label">Média de questões/dia</div><div class="value">${mediaDiaria.toFixed(1)}</div></div>
       <div class="stat-card gold"><div class="label">Sequência de dias</div><div class="value">${streak} 🔥</div></div>
       <div class="stat-card info"><div class="label">Tempo total estudado</div><div class="value">${_formatarMinutos(minutosTotalCiclo)}</div></div>
+      <div class="stat-card info"><div class="label">Tempo esta semana</div><div class="value">${_formatarMinutos(minutosSemanaCiclo)}</div></div>
     </div>
 
     <div class="card mb-12" id="card-relatorio-diario"></div>
@@ -723,7 +739,7 @@ function renderDashboard(view) {
         <div class="chart-wrap"><canvas id="chart-pizza"></canvas></div>
       </div>
       <div class="card">
-        <div class="card-title">Questões por disciplina</div>
+        <div class="card-title">Questões por dia — últimos 7 dias</div>
         <div class="chart-wrap"><canvas id="chart-barras"></canvas></div>
       </div>
     </div>
@@ -773,10 +789,10 @@ function renderDashboard(view) {
   try {
     renderPieChart('chart-pizza', { acertos: resumo.certas, erros: resumo.erradas, brancos: resumo.brancos });
     renderBarChart('chart-barras', {
-      labels: porDisciplina.map(d => d.nome),
-      certas: porDisciplina.map(d => d.certas),
-      erradas: porDisciplina.map(d => d.erradas),
-      brancos: porDisciplina.map(d => d.brancos)
+      labels: ultimos7.map(d => d.label),
+      certas: ultimos7.map(d => d.certas),
+      erradas: ultimos7.map(d => d.erradas),
+      brancos: ultimos7.map(d => d.brancos)
     });
   } catch (err) { console.error('Erro ao renderizar gráficos pizza/barras:', err); }
 

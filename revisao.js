@@ -193,13 +193,30 @@ async function gerarResumoTeoricoIA(item) {
 
 /* ── Renderização dos blocos de conteúdo ───────────────────── */
 
+function _botoesEdicao() {
+  return `
+    <div class="revisao-acoes-editar">
+      <button class="btn btn-sm btn-outline" id="btn-editar-resumo">✏️ Editar resumo</button>
+      <button class="btn btn-sm btn-primary" id="btn-salvar-edicao" style="display:none;">💾 Salvar</button>
+      <button class="btn btn-sm btn-ghost" id="btn-cancelar-edicao" style="display:none;">Cancelar</button>
+      <button class="btn btn-sm btn-outline" id="btn-pedir-mais-ia">✨ Pedir mais conteúdo à IA</button>
+    </div>
+    <div id="revisao-mais-ia-wrap" style="display:none;margin-top:14px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;">
+      <textarea id="revisao-mais-ia-prompt" class="revisao-textarea" rows="3"
+        placeholder="O que quer aprofundar? Ex: crie um mnemônico, adicione exemplos práticos, compare com outro conceito..."></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn btn-sm btn-primary" id="btn-enviar-mais-ia">✨ Enviar para a IA</button>
+        <button class="btn btn-sm btn-ghost" id="btn-cancelar-mais-ia">Cancelar</button>
+      </div>
+      <div id="revisao-mais-ia-resultado" style="display:none;margin-top:12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:14px;"></div>
+    </div>
+  `;
+}
+
 function _htmlConteudoCaderno(item) {
   return `
-    <div class="revisao-texto-preview" id="revisao-texto-preview"
-         style="line-height:1.7;font-size:14px;color:var(--text);">${_mdParaHtml(item.conteudoBruto)}</div>
-    <textarea class="revisao-textarea" id="revisao-textarea" style="display:none;"
-      rows="14">${escapeHtml(item.conteudoBruto || '')}</textarea>
-
+    <div id="revisao-texto-preview" style="line-height:1.7;font-size:14px;color:var(--text);">${_mdParaHtml(item.conteudoBruto)}</div>
+    <textarea id="revisao-textarea" class="revisao-textarea" style="display:none;" rows="14">${escapeHtml(item.conteudoBruto || '')}</textarea>
     ${item.conteudoCondensado ? `<div style="border-left:3px solid var(--gold);padding:10px 12px;margin-top:16px;color:var(--text-muted);font-size:13px;">
       📎 ${escapeHtml(item.conteudoCondensado)}
     </div>` : ''}
@@ -207,51 +224,18 @@ function _htmlConteudoCaderno(item) {
       <summary style="cursor:pointer;font-size:12.5px;color:var(--primary);font-weight:600;">📋 Enunciado original da questão</summary>
       <div style="white-space:pre-wrap;font-size:12.5px;color:var(--text-muted);padding:10px;background:var(--surface-2);border-radius:6px;margin-top:6px;">${escapeHtml(item.enunciado)}</div>
     </details>` : ''}
-
-    <div class="revisao-acoes-editar" style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
-      <button class="btn btn-sm btn-outline" id="btn-editar-resumo">✏️ Editar resumo</button>
-      <button class="btn btn-sm" id="btn-salvar-edicao" style="display:none;">💾 Salvar edição</button>
-      <button class="btn btn-sm btn-ghost" id="btn-cancelar-edicao" style="display:none;">Cancelar</button>
-      <button class="btn btn-sm btn-outline" id="btn-pedir-mais-ia">✨ Pedir mais conteúdo à IA</button>
-    </div>
-    <div id="revisao-mais-ia-wrap" style="display:none;margin-top:14px;">
-      <textarea id="revisao-mais-ia-prompt" class="revisao-textarea" rows="3"
-        placeholder="O que você quer aprofundar? Ex: Explique melhor as imunidades tributárias, adicione exemplos práticos, crie um mnemônico..."></textarea>
-      <div style="display:flex;gap:8px;margin-top:8px;">
-        <button class="btn btn-sm btn-primary" id="btn-enviar-mais-ia">✨ Enviar para a IA</button>
-        <button class="btn btn-sm btn-ghost" id="btn-cancelar-mais-ia">Cancelar</button>
-      </div>
-      <div id="revisao-mais-ia-resultado" style="display:none;margin-top:12px;"></div>
-    </div>
+    ${_botoesEdicao()}
   `;
 }
 
 function _htmlConteudoTeorico(item) {
   return `
-    <div class="revisao-texto-preview" id="revisao-texto-preview"
-         style="line-height:1.7;font-size:14px;color:var(--text);">${_mdParaHtml(item.conteudoBruto)}</div>
-    <textarea class="revisao-textarea" id="revisao-textarea" style="display:none;"
-      rows="14">${escapeHtml(item.conteudoBruto || '')}</textarea>
-
+    <div id="revisao-texto-preview" style="line-height:1.7;font-size:14px;color:var(--text);">${_mdParaHtml(item.conteudoBruto)}</div>
+    <textarea id="revisao-textarea" class="revisao-textarea" style="display:none;" rows="14">${escapeHtml(item.conteudoBruto || '')}</textarea>
     ${item.conteudoCondensado ? `<div style="border-left:3px solid var(--gold);padding:12px 12px 12px 16px;margin-top:16px;color:var(--text);font-size:13px;background:var(--surface-2);border-radius:6px;">
       ${_mdParaHtml(item.conteudoCondensado)}
     </div>` : ''}
-
-    <div class="revisao-acoes-editar" style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
-      <button class="btn btn-sm btn-outline" id="btn-editar-resumo">✏️ Editar resumo</button>
-      <button class="btn btn-sm" id="btn-salvar-edicao" style="display:none;">💾 Salvar edição</button>
-      <button class="btn btn-sm btn-ghost" id="btn-cancelar-edicao" style="display:none;">Cancelar</button>
-      <button class="btn btn-sm btn-outline" id="btn-pedir-mais-ia">✨ Pedir mais conteúdo à IA</button>
-    </div>
-    <div id="revisao-mais-ia-wrap" style="display:none;margin-top:14px;">
-      <textarea id="revisao-mais-ia-prompt" class="revisao-textarea" rows="3"
-        placeholder="O que você quer aprofundar? Ex: Adicione exemplos práticos, crie um mnemônico, compare com outro conceito..."></textarea>
-      <div style="display:flex;gap:8px;margin-top:8px;">
-        <button class="btn btn-sm btn-primary" id="btn-enviar-mais-ia">✨ Enviar para a IA</button>
-        <button class="btn btn-sm btn-ghost" id="btn-cancelar-mais-ia">Cancelar</button>
-      </div>
-      <div id="revisao-mais-ia-resultado" style="display:none;margin-top:12px;"></div>
-    </div>
+    ${_botoesEdicao()}
   `;
 }
 
@@ -357,25 +341,78 @@ function renderRevisao(view) {
     </div>
   `;
 
-  // Listeners
+  // Listeners de navegação
   $('#btn-li-e-entendi')?.addEventListener('click', () => _avancar(view, item, true));
   $('#btn-pular-revisao')?.addEventListener('click', () => _avancar(view, item, false));
 
-  // ── Edição inline ────────────────────────────────────────────
+  // Listeners de edição (registra agora se o conteúdo já está visível)
+  if (item.tipo === 'caderno') _setupListenersEdicao(item);
+
+  if (item.tipo === 'teorico' && !item.gerado) {
+    $('#btn-gerar-teoria')?.addEventListener('click', async () => {
+      if (_revisaoGerandoIA) return;
+      _revisaoGerandoIA = true;
+      const btn = $('#btn-gerar-teoria');
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Gerando…'; }
+      try {
+        const ia = await gerarResumoTeoricoIA(item);
+        item.conteudoBruto = ia.teoria;
+        item.conteudoCondensado = (ia.pontosFracos + '\n\n' + ia.checklist).trim();
+        item.gerado = true;
+
+        // Salva automaticamente no Caderno de Resumos para uso futuro
+        const novoId = await db.resumos.add({
+          materia:          item.materia,
+          topico:           item.topico || null,
+          data:             todayISO(),
+          textoBruto:       item.conteudoBruto,
+          textoCondensado:  item.conteudoCondensado,
+          tentativaId:      null,
+          enunciado:        null,
+          enviadoAnki:      false,
+          ankiDeck:         null,
+          origemRevisao:    true
+        });
+        item.resumoId = novoId;
+        await reloadState();
+        showToast('Resumo salvo no Caderno de Resumos! 📓', 'success');
+
+        const wrap = $('#revisao-teoria-gerada');
+        if (wrap) {
+          wrap.style.display = 'block';
+          wrap.innerHTML = _htmlConteudoTeorico(item);
+        }
+        if (btn) btn.style.display = 'none';
+        const tituloWrap = $('#revisao-teoria-wrap > p');
+        if (tituloWrap) tituloWrap.style.display = 'none';
+
+        // Registra listeners de edição APÓS injetar o HTML teórico
+        _setupListenersEdicao(item);
+
+      } catch (err) {
+        showToast(err.message || 'Erro ao gerar resumo teórico.', 'danger');
+        if (btn) { btn.disabled = false; btn.textContent = '✨ Tentar de novo'; }
+      } finally {
+        _revisaoGerandoIA = false;
+      }
+    });
+  }
+}
+
+/* ── Listeners de edição inline + pedir mais IA ─────────────── */
+
+function _setupListenersEdicao(item) {
+
+  // ── Editar ──────────────────────────────────────────────────
   $('#btn-editar-resumo')?.addEventListener('click', () => {
-    const preview = $('#revisao-texto-preview');
-    const textarea = $('#revisao-textarea');
-    const btnEditar = $('#btn-editar-resumo');
-    const btnSalvar = $('#btn-salvar-edicao');
-    const btnCancelar = $('#btn-cancelar-edicao');
-    if (!preview || !textarea) return;
-    preview.style.display = 'none';
-    textarea.style.display = 'block';
-    textarea.value = item.conteudoBruto || '';
-    textarea.focus();
-    btnEditar.style.display = 'none';
-    btnSalvar.style.display = 'inline-flex';
-    btnCancelar.style.display = 'inline-flex';
+    $('#revisao-texto-preview').style.display = 'none';
+    const ta = $('#revisao-textarea');
+    ta.style.display = 'block';
+    ta.value = item.conteudoBruto || '';
+    ta.focus();
+    $('#btn-editar-resumo').style.display = 'none';
+    $('#btn-salvar-edicao').style.display = 'inline-flex';
+    $('#btn-cancelar-edicao').style.display = 'inline-flex';
   });
 
   $('#btn-cancelar-edicao')?.addEventListener('click', () => {
@@ -392,16 +429,12 @@ function renderRevisao(view) {
 
     item.conteudoBruto = novoTexto;
 
-    // Persiste no Caderno de Resumos
+    // Persiste no banco
     if (item.resumoId) {
       const todos = await db.resumos.getAll();
       const resumo = todos.find(r => r.id === item.resumoId);
-      if (resumo) {
-        resumo.textoBruto = novoTexto;
-        await db.resumos.update(resumo);
-      }
+      if (resumo) { resumo.textoBruto = novoTexto; await db.resumos.update(resumo); }
     } else {
-      // Sem resumoId ainda (teórico recém-gerado antes de salvar): salva agora
       const novoId = await db.resumos.add({
         materia: item.materia, topico: item.topico || null,
         data: todayISO(), textoBruto: novoTexto,
@@ -415,21 +448,23 @@ function renderRevisao(view) {
     await reloadState();
     showToast('Resumo salvo! ✓', 'success');
 
-    // Atualiza preview sem re-renderizar a tela toda
+    // Volta ao preview atualizado
     const preview = $('#revisao-texto-preview');
     if (preview) preview.innerHTML = _mdParaHtml(novoTexto);
-    $('#revisao-texto-preview').style.display = 'block';
+    preview.style.display = 'block';
     $('#revisao-textarea').style.display = 'none';
     $('#btn-editar-resumo').style.display = 'inline-flex';
     $('#btn-salvar-edicao').style.display = 'none';
     $('#btn-cancelar-edicao').style.display = 'none';
   });
 
-  // ── Pedir mais conteúdo à IA ─────────────────────────────────
+  // ── Pedir mais à IA ─────────────────────────────────────────
   $('#btn-pedir-mais-ia')?.addEventListener('click', () => {
     const wrap = $('#revisao-mais-ia-wrap');
-    if (wrap) { wrap.style.display = wrap.style.display === 'none' ? 'block' : 'none'; }
-    $('#revisao-mais-ia-prompt')?.focus();
+    if (!wrap) return;
+    const aberto = wrap.style.display !== 'none';
+    wrap.style.display = aberto ? 'none' : 'block';
+    if (!aberto) $('#revisao-mais-ia-prompt')?.focus();
   });
 
   $('#btn-cancelar-mais-ia')?.addEventListener('click', () => {
@@ -459,53 +494,36 @@ function renderRevisao(view) {
       const prompt = `Você é um professor de concursos. O aluno está revisando "${item.disciplina}"${item.topico ? ` — tópico: ${item.topico}` : ''}.
 
 RESUMO ATUAL:
-${item.conteudoBruto || '(sem resumo ainda)'}
+${item.conteudoBruto || '(sem resumo)'}
 
 PEDIDO DO ALUNO:
 ${pedido}
 
-Responda com conteúdo adicional relevante, em linguagem de caderno de estudos. Use **negrito** para termos importantes, listas quando necessário. Seja direto e denso — o aluno já leu o resumo acima.`;
+Responda com conteúdo adicional relevante em linguagem de caderno de estudos. Use **negrito** para termos-chave, listas quando útil. Seja denso e direto — o aluno já leu o resumo.`;
 
       let textoGerado = '';
+      const renderIA = (txt) => {
+        if (resultado) resultado.innerHTML = `<div style="line-height:1.7;font-size:14px;color:var(--text);border-left:3px solid var(--primary);padding-left:12px;">${_mdParaHtml(txt)}</div>`;
+        textoGerado = txt;
+      };
 
       if (typeof window.chamarGeminiResumoStream === 'function') {
-        await window.chamarGeminiResumoStream(prompt, (acumulado) => {
-          if (resultado) resultado.innerHTML = `
-            <div style="line-height:1.7;font-size:14px;color:var(--text);
-                        border-left:3px solid var(--primary);padding-left:12px;">
-              ${_mdParaHtml(acumulado)}
-            </div>`;
-          textoGerado = acumulado;
-        });
+        await window.chamarGeminiResumoStream(prompt, renderIA);
       } else {
         textoGerado = await window.chamarGeminiResumo(prompt);
-        if (resultado) resultado.innerHTML = `
-          <div style="line-height:1.7;font-size:14px;color:var(--text);
-                      border-left:3px solid var(--primary);padding-left:12px;">
-            ${_mdParaHtml(textoGerado)}
-          </div>`;
+        renderIA(textoGerado);
       }
 
-      // Oferece incorporar ao resumo principal
+      // Botão para incorporar ao resumo principal
       if (textoGerado && resultado) {
-        resultado.innerHTML += `
-          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
-            <button class="btn btn-sm btn-outline" id="btn-incorporar-ia">
-              📎 Incorporar ao resumo principal
-            </button>
-          </div>`;
-
+        resultado.innerHTML += `<button class="btn btn-sm btn-outline" id="btn-incorporar-ia" style="margin-top:12px;">📎 Incorporar ao resumo principal</button>`;
         $('#btn-incorporar-ia')?.addEventListener('click', async () => {
-          const separador = '\n\n---\n\n';
-          item.conteudoBruto = (item.conteudoBruto || '') + separador + textoGerado;
+          item.conteudoBruto = (item.conteudoBruto || '') + '\n\n---\n\n' + textoGerado;
 
           if (item.resumoId) {
             const todos = await db.resumos.getAll();
             const resumo = todos.find(r => r.id === item.resumoId);
-            if (resumo) {
-              resumo.textoBruto = item.conteudoBruto;
-              await db.resumos.update(resumo);
-            }
+            if (resumo) { resumo.textoBruto = item.conteudoBruto; await db.resumos.update(resumo); }
           } else {
             const novoId = await db.resumos.add({
               materia: item.materia, topico: item.topico || null,
@@ -516,20 +534,17 @@ Responda com conteúdo adicional relevante, em linguagem de caderno de estudos. 
             });
             item.resumoId = novoId;
           }
-
           await reloadState();
           const preview = $('#revisao-texto-preview');
           if (preview) preview.innerHTML = _mdParaHtml(item.conteudoBruto);
-          const textarea = $('#revisao-textarea');
-          if (textarea) textarea.value = item.conteudoBruto;
-          showToast('Conteúdo incorporado e salvo no Caderno! 📓', 'success');
-          $('#btn-incorporar-ia').textContent = '✓ Incorporado!';
-          $('#btn-incorporar-ia').disabled = true;
+          showToast('Conteúdo incorporado e salvo! 📓', 'success');
+          const btnInc = $('#btn-incorporar-ia');
+          if (btnInc) { btnInc.textContent = '✓ Incorporado!'; btnInc.disabled = true; }
         });
       }
 
       if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.textContent = '✨ Enviar para a IA'; }
-      $('#revisao-mais-ia-prompt').value = '';
+      if ($('#revisao-mais-ia-prompt')) $('#revisao-mais-ia-prompt').value = '';
 
     } catch (err) {
       showToast(err.message || 'Erro ao consultar IA.', 'danger');
@@ -537,52 +552,6 @@ Responda com conteúdo adicional relevante, em linguagem de caderno de estudos. 
       if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.textContent = '✨ Enviar para a IA'; }
     }
   });
-
-  if (item.tipo === 'teorico' && !item.gerado) {
-    $('#btn-gerar-teoria')?.addEventListener('click', async () => {
-      if (_revisaoGerandoIA) return;
-      _revisaoGerandoIA = true;
-      const btn = $('#btn-gerar-teoria');
-      if (btn) { btn.disabled = true; btn.textContent = '⏳ Gerando…'; }
-      try {
-        const ia = await gerarResumoTeoricoIA(item);
-        item.conteudoBruto = ia.teoria;
-        item.conteudoCondensado = (ia.pontosFracos + '\n\n' + ia.checklist).trim();
-        item.gerado = true;
-
-        // Salva automaticamente no Caderno de Resumos para uso futuro
-        const novoId = await db.resumos.add({
-          materia:          item.materia,
-          topico:           item.topico || null,
-          data:             todayISO(),
-          textoBruto:       item.conteudoBruto,
-          textoCondensado:  item.conteudoCondensado,
-          tentativaId:      null,   // gerado pela IA, sem tentativa vinculada
-          enunciado:        null,
-          enviadoAnki:      false,
-          ankiDeck:         null,
-          origemRevisao:    true    // flag pra distinguir no Caderno se precisar
-        });
-        item.resumoId = novoId;
-        await reloadState(); // atualiza state.resumos
-        showToast('Resumo salvo no Caderno de Resumos! 📓', 'success');
-
-        const wrap = $('#revisao-teoria-gerada');
-        if (wrap) {
-          wrap.style.display = 'block';
-          wrap.innerHTML = _htmlConteudoTeorico(item);
-        }
-        if (btn) btn.style.display = 'none';
-        const tituloWrap = $('#revisao-teoria-wrap > p');
-        if (tituloWrap) tituloWrap.style.display = 'none';
-      } catch (err) {
-        showToast(err.message || 'Erro ao gerar resumo teórico.', 'danger');
-        if (btn) { btn.disabled = false; btn.textContent = '✨ Tentar de novo'; }
-      } finally {
-        _revisaoGerandoIA = false;
-      }
-    });
-  }
 }
 
 async function _avancar(view, item, marcar) {

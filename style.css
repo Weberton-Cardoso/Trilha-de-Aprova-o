@@ -928,85 +928,184 @@ tr.row-motivo td{ padding-top:0; padding-bottom:8px; border-top:none; }
 .texto-resumo-bruto li:last-child,
 .caderno-main li:last-child{ margin-bottom:0; }
 
+/* ===== TTS DROPDOWN ===== */
+.tts-dropdown-wrap {
+  position: relative;
+}
+
+.tts-dropdown {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+  width: 280px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: fadeInDown 0.15s ease;
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.tts-dropdown-header {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tts-dropdown-row {
+  display: flex;
+  gap: 6px;
+}
+
+.tts-btn-play {
+  flex: 1;
+  background: var(--gold-soft);
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.tts-btn-play:hover { background: var(--gold); color: #0B0F14; }
+
+.tts-btn-ctrl {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.tts-btn-ctrl:hover { border-color: var(--gold); color: var(--gold); }
+
+.tts-dropdown-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: var(--surface-2);
+  border-radius: 6px;
+}
+
+.tts-dropdown-sliders label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.tts-dropdown-sliders input[type="range"] {
+  flex: 1;
+  height: 3px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+}
+.tts-dropdown-sliders input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: var(--gold);
+  cursor: pointer;
+}
+.tts-dropdown-sliders span {
+  min-width: 36px;
+  text-align: right;
+  font-weight: 700;
+  font-size: 11.5px;
+  color: var(--gold);
+}
+
+.tts-dropdown-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 6px 8px;
+  background: var(--surface-2);
+  border-radius: 6px;
+  line-height: 1.4;
+}
+
+/* Chevron animado */
+#tts-chevron {
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+/* Mobile: dropdown vira full-width */
+@media (max-width: 600px) {
+  .tts-dropdown {
+    right: auto;
+    left: 0;
+    width: calc(100vw - 32px);
+    max-width: 320px;
+  }
+}
+
 /* ══════════════════════════════════════════════════════════
-   CICLO TOPBAR WIDGET — Timer flutuante do Ciclo de Estudos
-   Aparece na topbar quando uma sessão está ativa
+   BÚSSOLA DO EDITAL — visão verticalizada com status automático
 ══════════════════════════════════════════════════════════ */
-.ciclo-topbar-widget{
-  display:flex; align-items:center; gap:10px;
-  background:var(--surface-2); border:1px solid var(--gold);
-  border-radius:999px; padding:6px 12px 6px 10px;
-  flex-shrink:0; min-width:0;
-  transition:border-color .2s, background .2s;
+.bussola-disc{
+  transition:box-shadow .15s;
 }
-.ciclo-topbar-widget.pausado{
-  border-color:var(--text-muted);
-  opacity:.85;
+.bussola-disc:hover{
+  box-shadow:0 0 0 1px var(--border);
+}
+.bussola-disc-header{
+  display:flex; align-items:center; gap:12px;
+  padding:2px 0;
+}
+.bussola-chev{
+  transition:transform .2s; flex-shrink:0; color:var(--text-muted);
+}
+.bussola-chev.open{ transform:rotate(180deg); }
+
+.bussola-topicos{ display:flex; flex-direction:column; gap:8px; }
+.bussola-topico{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:10px 12px; border-radius:8px; background:var(--surface-2);
+  border-left:3px solid var(--border);
 }
 
-/* Dot animado — verde quando rodando, cinza quando pausado */
-.ciclo-topbar-dot{
-  width:8px; height:8px; border-radius:50%; flex-shrink:0;
-  background:var(--success);
-  box-shadow:0 0 0 0 var(--success);
-  animation:cicloTopbarPulse 1.4s ease-in-out infinite;
-}
-.ciclo-topbar-widget.pausado .ciclo-topbar-dot{
-  background:var(--text-muted);
-  box-shadow:none;
-  animation:none;
-}
-@keyframes cicloTopbarPulse{
-  0%   { box-shadow:0 0 0 0 rgba(52,211,153,.6); }
-  70%  { box-shadow:0 0 0 6px rgba(52,211,153,0); }
-  100% { box-shadow:0 0 0 0 rgba(52,211,153,0); }
-}
-
-/* Info — status + nome da matéria */
-.ciclo-topbar-info{
-  display:flex; flex-direction:column; line-height:1.2; min-width:0;
-}
-.ciclo-topbar-status{
-  font-size:10px; font-weight:700; letter-spacing:.06em;
-  color:var(--gold); text-transform:uppercase;
-}
-.ciclo-topbar-widget.pausado .ciclo-topbar-status{
-  color:var(--text-muted);
-}
-.ciclo-topbar-nome{
-  font-size:12.5px; font-weight:600; color:var(--text);
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  max-width:140px; cursor:pointer;
-}
-.ciclo-topbar-nome:hover{ color:var(--gold); }
-
-/* Relógio */
-.ciclo-topbar-relogio{
-  font-family:var(--font-mono); font-size:16px; font-weight:700;
-  color:var(--text); letter-spacing:.04em; flex-shrink:0;
-}
-
-/* Botões de ação */
-.ciclo-topbar-btns{
-  display:flex; align-items:center; gap:4px;
-}
-.ciclo-topbar-btn{
-  width:28px; height:28px; border-radius:50%; border:none;
-  display:flex; align-items:center; justify-content:center;
-  cursor:pointer; flex-shrink:0; transition:background .15s, color .15s;
-  background:var(--surface); color:var(--text-muted);
-}
-.ciclo-topbar-btn:hover{ background:var(--surface-hover); color:var(--text); }
-.ciclo-topbar-btn-ok{
-  background:var(--gold); color:#0B0F14;
-}
-.ciclo-topbar-btn-ok:hover{ background:#A79AF9; color:#fff; }
-.ciclo-topbar-btn-cancel:hover{ background:var(--danger-soft); color:var(--danger); }
-
-/* Mobile — oculta o nome da matéria pra não estourar */
 @media(max-width:640px){
-  .ciclo-topbar-nome{ display:none; }
-  .ciclo-topbar-info{ display:none; }
-  .ciclo-topbar-widget{ padding:6px 8px; gap:6px; }
-  .ciclo-topbar-relogio{ font-size:14px; }
+  .bussola-topico{ flex-direction:column; align-items:flex-start; }
+  .bussola-disc-header{ flex-wrap:wrap; }
+}
+
+/* ---- Vínculo Edital ↔ Ciclo ---- */
+.bussola-ciclo-vinculo {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px; padding: 2px 8px; border-radius: 999px;
+  cursor: pointer; transition: background .15s;
+  pointer-events: all; /* garante que o clique não propaga pra toggle-disc */
+}
+.bussola-ciclo-vinculo.com-vinculo {
+  background: rgba(232,177,77,.12); color: var(--gold);
+  border: 1px solid rgba(232,177,77,.3);
+}
+.bussola-ciclo-vinculo.sem-vinculo {
+  background: var(--surface-2); color: var(--text-faint);
+  border: 1px dashed var(--border);
+}
+.bussola-ciclo-vinculo:hover {
+  filter: brightness(1.15);
 }
