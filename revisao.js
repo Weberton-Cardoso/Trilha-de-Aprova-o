@@ -263,11 +263,19 @@ async function gerarResumoDiagnosticoIA(item) {
   const teoria = parsed.teoria || '';
   const condensado = (parsed.pontosFracos || '') + (parsed.checklist ? '\n\n' + parsed.checklist : '');
 
+  // Todos os resumos vindos de diagnóstico caem no MESMO tópico fixo
+  // "Diagnósticos de Erro" dentro da disciplina — em vez de um tópico novo
+  // por assunto específico gerado pela IA (o que fragmentava a árvore do
+  // Caderno, um nó por diagnóstico). O agrupamento por dia continua
+  // acontecendo normalmente, só que dentro desse único nó, através do
+  // agrupamento por data que a tela do Caderno já faz sozinha.
+  const cabecalho = `**${item.padrao}**${item.topico ? ` _(${item.topico})_` : ''}`;
+
   const resumoId = await db.resumos.add({
     materia: item.materia,
-    topico: item.topico || null,
+    topico: 'Diagnósticos de Erro',
     data: todayISO(),
-    textoBruto: teoria,
+    textoBruto: `${cabecalho}\n\n${teoria}`,
     textoCondensado: condensado.trim(),
     tentativaId: null,
     enunciado: null,
