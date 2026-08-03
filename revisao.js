@@ -390,15 +390,26 @@ function renderRevisao(view) {
   const hoje = todayISO();
   const jaLidosHoje = state.revisoes.filter(r => r.data === hoje).length;
 
-  // Recalcula a fila só se mudou o dia ou está vazia
-  if (!_revisaoFilaDoDia.length || _revisaoFilaDoDia._data !== hoje) {
+  // Assinatura dos diagnósticos ativos no momento (ids ordenados) — se mudar
+  // (um novo diagnóstico foi gerado, um foi descartado/revisado em outra
+  // aba etc.), a fila precisa recalcular MESMO dentro do mesmo dia, senão
+  // um diagnóstico novo só apareceria na Revisão do Dia amanhã.
+  const diagAtivosAgora = (state.diagnosticosErro || [])
+    .filter(d => d.status === 'ativo')
+    .map(d => d.id)
+    .sort((a, b) => a - b)
+    .join(',');
+
+  // Recalcula a fila se mudou o dia, está vazia, ou os diagnósticos ativos mudaram
+  if (!_revisaoFilaDoDia.length || _revisaoFilaDoDia._data !== hoje || _revisaoFilaDoDia._diagAtivos !== diagAtivosAgora) {
     _revisaoFilaDoDia = calcFilaRevisao();
     _revisaoFilaDoDia._data = hoje;
+    _revisaoFilaDoDia._diagAtivos = diagAtivosAgora;
     _revisaoIndice = 0;
   }
 
-  // Sem ciclo cadastrado
-  if (!state.cicloMaterias.length) {
+  // Sem ciclo cadastrado E sem diagnósticos ativos — aí sim não tem o que mostrar
+  if (!state.cicloMaterias.length && !_revisaoFilaDoDia.length) {
     view.innerHTML = `
       <div class="empty-state">
         <p>📚 Configure o Ciclo de Estudos primeiro</p>
