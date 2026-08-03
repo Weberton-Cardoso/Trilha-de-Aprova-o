@@ -16,6 +16,11 @@
 /* ── Configuração ──────────────────────────────────────────── */
 
 const REVISAO_POR_DIA = 5;        // itens exibidos por sessão de revisão
+// Diagnósticos de erro têm prioridade, mas não podem tomar TODAS as vagas do
+// dia — senão, com um backlog grande de diagnósticos ativos, as matérias do
+// Ciclo de Estudos somem da Revisão do Dia. Reserva sempre pelo menos
+// (REVISAO_POR_DIA - DIAGNOSTICO_POR_DIA_MAX) vagas pro Ciclo.
+const DIAGNOSTICO_POR_DIA_MAX = 3;
 let _revisaoIndice    = 0;
 let _revisaoFilaDoDia = [];
 let _revisaoGerandoIA = false;    // lock anti-duplo-clique
@@ -81,7 +86,7 @@ function calcFilaRevisao() {
     .sort((a, b) => (a.criadoEm || '').localeCompare(b.criadoEm || ''));
 
   for (const d of diagnosticosAtivos) {
-    if (fila.length >= REVISAO_POR_DIA) break;
+    if (fila.length >= Math.min(REVISAO_POR_DIA, DIAGNOSTICO_POR_DIA_MAX)) break;
     const errosDoDiagnostico = (state.errosQuestoes || []).filter(e => (d.erroIds || []).includes(e.id));
     // Se a IA já gerou um resumo completo pra este diagnóstico antes (via
     // "Gerar resumo completo" abaixo), reaproveita o conteúdo salvo no
