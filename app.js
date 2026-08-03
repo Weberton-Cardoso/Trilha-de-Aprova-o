@@ -350,6 +350,7 @@ const PAGE_TITLES = {
   'ciclo': 'Ciclo de Estudos',
   'revisao': 'Revisão do Dia',
   'evolucao-revisao': 'Evolução da Revisão',
+  'diagnostico': 'Diagnóstico de Erros',
   'estatisticas/disciplinas': 'Estatísticas por Disciplina',
   'estatisticas/assuntos': 'Estatísticas por Assunto',
   'estatisticas/bancas': 'Estatísticas por Banca',
@@ -463,6 +464,10 @@ async function router() {
     $('#page-title').textContent = PAGE_TITLES['evolucao-revisao'];
     updateActiveNav('revisao');
     if (typeof renderEvolucaoRevisao === 'function') renderEvolucaoRevisao(view);
+  } else if (base === 'diagnostico') {
+    $('#page-title').textContent = PAGE_TITLES['diagnostico'];
+    updateActiveNav('diagnostico');
+    if (typeof renderDiagnosticoErros === 'function') renderDiagnosticoErros(view);
   } else if (base === 'configuracoes') {
     $('#page-title').textContent = PAGE_TITLES['configuracoes'];
     updateActiveNav('configuracoes');
@@ -729,6 +734,8 @@ function renderDashboard(view) {
       <div class="stat-card info"><div class="label">Tempo esta semana</div><div class="value">${_formatarMinutos(minutosSemanaCiclo)}</div></div>
     </div>
 
+    <div class="card mb-12" id="card-recomendacao-dia"></div>
+
     <div class="card mb-12" id="card-relatorio-diario"></div>
 
     <div class="card mb-12" id="card-prioridade-revisao"></div>
@@ -820,6 +827,9 @@ function renderDashboard(view) {
   try { initDashboardEditalChart(); } catch (err) { console.error('Erro em initDashboardEditalChart:', err); }
   try { renderStatsPorDisciplina(); } catch (err) { console.error('Erro em renderStatsPorDisciplina:', err); }
   try { renderTempoPorTipoCicloDashboard(); } catch (err) { console.error('Erro em renderTempoPorTipoCicloDashboard:', err); }
+  try {
+    if (typeof renderCardRecomendacaoDia === 'function') renderCardRecomendacaoDia().catch(err => console.error('Erro em renderCardRecomendacaoDia:', err));
+  } catch (err) { console.error('Erro em renderCardRecomendacaoDia:', err); }
   try { renderRelatorioDiario(); } catch (err) { console.error('Erro em renderRelatorioDiario:', err); }
   try { renderPrioridadeRevisao(); } catch (err) { console.error('Erro em renderPrioridadeRevisao:', err); }
   try { renderCorrelacaoTipoTaxa(); } catch (err) { console.error('Erro em renderCorrelacaoTipoTaxa:', err); }
@@ -1457,12 +1467,16 @@ function renderTentativas(view) {
   view.innerHTML = `
     <div class="toolbar">
       <input type="text" class="search-input" id="busca-tentativas" placeholder="Pesquisar por disciplina, assunto, banca ou concurso..." value="${escapeHtml(_tentativasBusca)}">
+      <button class="btn" id="btn-registrar-erro-tentativas">📝 Registrar erro</button>
       <button class="btn btn-primary" id="btn-nova-tentativa"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg> Registrar tentativa</button>
     </div>
     <div id="lista-tentativas"></div>
   `;
 
   $('#btn-nova-tentativa').addEventListener('click', () => openTentativaModal());
+  $('#btn-registrar-erro-tentativas').addEventListener('click', () => {
+    if (typeof abrirModalRegistrarErro === 'function') abrirModalRegistrarErro({ origem: 'tentativas' });
+  });
   const buscaInput = $('#busca-tentativas');
   buscaInput.addEventListener('input', () => {
     _tentativasBusca = buscaInput.value;
@@ -2300,6 +2314,25 @@ function _renderResolverIAResultado(view) {
       enviadoAnki: false,
       ankiDeck: null
     });
+
+    // Diagnóstico de Erros (analise-erros.js): toda questão errada aqui já
+    // entra sozinha na fila de análise da IA, sem precisar registrar de
+    // novo manualmente — é a única tela que já tem enunciado + resposta +
+    // gabarito confirmado disponíveis no momento do salvamento.
+    if (r.resultado === 'errada' && typeof db.errosQuestoes !== 'undefined') {
+      await db.errosQuestoes.add({
+        origem: 'resolver_ia',
+        tentativaId: _resolverIASessaoTentativaId,
+        disciplina, assunto,
+        enunciado: r.enunciado,
+        alternativaMarcada: respostaMarcada || '',
+        gabaritoCorreto: gabaritoConfirmado,
+        data: todayISO(),
+        analisado: false,
+        diagnosticoId: null,
+        criadoEm: new Date().toISOString()
+      });
+    }
 
     _resolverIAContagem[r.resultado === 'certa' ? 'certas' : r.resultado === 'errada' ? 'erradas' : 'brancos']++;
     _resolverIASessao = { disciplina, assunto, banca, concurso };

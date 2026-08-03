@@ -448,6 +448,17 @@ function renderCicloPainelRoute(view, cicloId) {
     if (btnPausar) btnPausar.addEventListener('click', () => _pausarSessaoCiclo(view, cicloId));
     const btnRetomar = $('#btn-retomar-sessao');
     if (btnRetomar) btnRetomar.addEventListener('click', () => _retomarSessaoCiclo(view, cicloId));
+    const btnRegistrarErro = $('#btn-registrar-erro-ciclo');
+    if (btnRegistrarErro) btnRegistrarErro.addEventListener('click', () => {
+      const materiaAtiva = state.cicloMaterias.find(m => m.id === sessaoAtiva.materiaId);
+      if (typeof abrirModalRegistrarErro === 'function') {
+        abrirModalRegistrarErro({
+          disciplina: materiaAtiva ? materiaAtiva.nome : '',
+          assunto: sessaoAtiva.topico || '',
+          origem: 'ciclo'
+        });
+      }
+    });
     const selTipo = $('#ciclo-tipo-estudo');
     if (selTipo) selTipo.addEventListener('change', () => {
       settings.cicloSessaoAtiva = { ...settings.cicloSessaoAtiva, tipoEstudo: selTipo.value || null };
@@ -705,6 +716,7 @@ function _renderCicloSessaoAtivaCard(sessaoAtiva) {
           ? `<button class="btn btn-primary" id="btn-retomar-sessao">Retomar</button>`
           : `<button class="btn" id="btn-pausar-sessao">Pausar</button>`
         }
+        <button class="btn" id="btn-registrar-erro-ciclo">📝 Registrar erro</button>
         <button class="btn btn-primary" id="btn-concluir-sessao">Concluir sessão</button>
         <button class="btn btn-ghost" id="btn-cancelar-sessao">Cancelar</button>
       </div>

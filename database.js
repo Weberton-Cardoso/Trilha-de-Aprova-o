@@ -43,10 +43,27 @@
  *     questão de origem e um resultado de 3 estados ('certa'|'errada'|
  *     'branco') — isso é só um uso novo de campos livres no mesmo store de
  *     tentativas, não exige migração de schema.
+ * v10: Sistema de Revisão do Dia — rastreia revisões concluídas por tema.
+ * v11: DIAGNÓSTICO DE ERROS (padrão de erro + recomendação da IA). Cria dois
+ *     stores novos:
+ *     - "errosQuestoes": um registro por QUESTÃO ERRADA individual, vinda de
+ *       qualquer tela (Resolver com IA, Ciclo de Estudos, Simulados,
+ *       Tentativas ou avulso). Guarda disciplina/assunto, enunciado (se
+ *       colado), alternativa marcada, gabarito correto, origem, e um
+ *       controle "analisado" (se já entrou em algum diagnóstico da IA).
+ *     - "diagnosticosErro": o resultado gerado pela IA a partir de um lote
+ *       de errosQuestoes — um "padrão de erro" (ex.: "base de cálculo do
+ *       ISS") + uma recomendação específica de revisão, com a lista dos
+ *       erros que embasaram aquela recomendação (erroIds). Guarda também
+ *       "textoOriginalIA" (a recomendação como a IA gerou, antes de
+ *       qualquer edição) e um "status" (ativo/revisado/descartado) — é aqui
+ *       que entra a correção manual: se a IA errar o diagnóstico, dá pra
+ *       editar o texto ou descartar, sem perder o registro. Ver
+ *       analise-erros.js.
  */
 
 const DB_NAME = 'TrilhaAprovacaoDB';
-const DB_VERSION = 10;
+const DB_VERSION = 11;
 
 const STORES = {
   tentativas: 'tentativas',
@@ -59,14 +76,17 @@ const STORES = {
   perfis: 'perfis',
   backupsLocais: 'backupsLocais',
   resumos: 'resumos',
-  revisoes: 'revisoes'
+  revisoes: 'revisoes',
+  errosQuestoes: 'errosQuestoes',
+  diagnosticosErro: 'diagnosticosErro'
 };
 
 /** Stores que pertencem a um perfil de estatísticas específico — getAll/add/clear
  *  destes stores são automaticamente filtrados/marcados pelo perfil ativo. */
 const PERFIL_SCOPED_STORES = new Set([
   STORES.tentativas, STORES.editais, STORES.simulados,
-  STORES.ciclos, STORES.cicloMaterias, STORES.cicloSessoes, STORES.resumos
+  STORES.ciclos, STORES.cicloMaterias, STORES.cicloSessoes, STORES.resumos,
+  STORES.errosQuestoes, STORES.diagnosticosErro
 ]);
 
 const TIPOS_TENTATIVA = [
@@ -280,6 +300,20 @@ function openDB() {
         revisoesStore.createIndex('data', 'data', { unique: false });
         revisoesStore.createIndex('disciplina', 'disciplina', { unique: false });
       }
+
+      // v11: Diagnóstico de Erros — ver comentário no topo do arquivo.
+      if (!db.objectStoreNames.contains(STORES.errosQuestoes)) {
+        const errosStore = db.createObjectStore(STORES.errosQuestoes, { keyPath: 'id', autoIncrement: true });
+        errosStore.createIndex('analisado', 'analisado', { unique: false });
+        errosStore.createIndex('data', 'data', { unique: false });
+        errosStore.createIndex('disciplina', 'disciplina', { unique: false });
+        errosStore.createIndex('tentativaId', 'tentativaId', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORES.diagnosticosErro)) {
+        const diagStore = db.createObjectStore(STORES.diagnosticosErro, { keyPath: 'id', autoIncrement: true });
+        diagStore.createIndex('status', 'status', { unique: false });
+        diagStore.createIndex('criadoEm', 'criadoEm', { unique: false });
+      }
     };
 
     req.onsuccess = (event) => resolve(event.target.result);
@@ -467,6 +501,25 @@ const db = {
     clear: () => db.clear(STORES.revisoes)
   },
 
+  // Diagnóstico de Erros (v11) — ver analise-erros.js.
+  errosQuestoes: {
+    add: (e) => db.add(STORES.errosQuestoes, e),
+    update: (e) => db.update(STORES.errosQuestoes, e),
+    remove: (id) => db.remove(STORES.errosQuestoes, id),
+    get: (id) => db.get(STORES.errosQuestoes, id),
+    getAll: () => db.getAll(STORES.errosQuestoes),
+    clear: () => db.clear(STORES.errosQuestoes)
+  },
+
+  diagnosticosErro: {
+    add: (d) => db.add(STORES.diagnosticosErro, d),
+    update: (d) => db.update(STORES.diagnosticosErro, d),
+    remove: (id) => db.remove(STORES.diagnosticosErro, id),
+    get: (id) => db.get(STORES.diagnosticosErro, id),
+    getAll: () => db.getAll(STORES.diagnosticosErro),
+    clear: () => db.clear(STORES.diagnosticosErro)
+  },
+
   // Perfis de estatísticas (não filtrados por perfil — é a própria lista deles).
   perfis: {
     add: (p) => db.add(STORES.perfis, p),
@@ -490,20 +543,23 @@ const db = {
   },
 
   async exportAll() {
-    const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos] = await Promise.all([
+    const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos, errosQuestoes, diagnosticosErro] = await Promise.all([
       db.getAll(STORES.tentativas),
       db.getAll(STORES.editais),
       db.getAll(STORES.simulados),
       db.getAll(STORES.ciclos),
       db.getAll(STORES.cicloMaterias),
       db.getAll(STORES.cicloSessoes),
-      db.getAll(STORES.resumos)
+      db.getAll(STORES.resumos),
+      db.getAll(STORES.errosQuestoes),
+      db.getAll(STORES.diagnosticosErro)
     ]);
     return {
       versao: DB_VERSION,
       exportadoEm: new Date().toISOString(),
       alteradoEm: db.getUltimaAlteracaoLocal(),
-      tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos
+      tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos,
+      errosQuestoes, diagnosticosErro
     };
   },
 
@@ -512,7 +568,7 @@ const db = {
    *  ser usado para um backup manual "de tudo", diferente do backup normal
    *  que exporta só o perfil ativo). */
   async exportAllRaw() {
-    const [perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos] = await Promise.all([
+    const [perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos, errosQuestoes, diagnosticosErro] = await Promise.all([
       tx(STORES.perfis, 'readonly', (store) => store.getAll()),
       tx(STORES.tentativas, 'readonly', (store) => store.getAll()),
       tx(STORES.editais, 'readonly', (store) => store.getAll()),
@@ -520,13 +576,16 @@ const db = {
       tx(STORES.ciclos, 'readonly', (store) => store.getAll()),
       tx(STORES.cicloMaterias, 'readonly', (store) => store.getAll()),
       tx(STORES.cicloSessoes, 'readonly', (store) => store.getAll()),
-      tx(STORES.resumos, 'readonly', (store) => store.getAll())
+      tx(STORES.resumos, 'readonly', (store) => store.getAll()),
+      tx(STORES.errosQuestoes, 'readonly', (store) => store.getAll()),
+      tx(STORES.diagnosticosErro, 'readonly', (store) => store.getAll())
     ]);
     return {
       versao: DB_VERSION,
       tipo: 'completo',
       exportadoEm: new Date().toISOString(),
-      perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos
+      perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos,
+      errosQuestoes, diagnosticosErro
     };
   },
 
@@ -542,7 +601,9 @@ const db = {
       tx(STORES.ciclos, 'readwrite', (store) => store.clear()),
       tx(STORES.cicloMaterias, 'readwrite', (store) => store.clear()),
       tx(STORES.cicloSessoes, 'readwrite', (store) => store.clear()),
-      tx(STORES.resumos, 'readwrite', (store) => store.clear())
+      tx(STORES.resumos, 'readwrite', (store) => store.clear()),
+      tx(STORES.errosQuestoes, 'readwrite', (store) => store.clear()),
+      tx(STORES.diagnosticosErro, 'readwrite', (store) => store.clear())
     ]);
 
     const restaurar = (storeName, lista) =>
@@ -556,6 +617,8 @@ const db = {
     await restaurar(STORES.cicloMaterias, dados.cicloMaterias);
     await restaurar(STORES.cicloSessoes, dados.cicloSessoes);
     await restaurar(STORES.resumos, dados.resumos);
+    await restaurar(STORES.errosQuestoes, dados.errosQuestoes);
+    await restaurar(STORES.diagnosticosErro, dados.diagnosticosErro);
   },
 
   /** Encontra e corrige registros "invisíveis" — itens de stores com
@@ -629,7 +692,9 @@ const db = {
         db.clear(STORES.cicloMaterias),
         db.clear(STORES.cicloSessoes),
         db.clear(STORES.cicloConfig),
-        db.clear(STORES.resumos)
+        db.clear(STORES.resumos),
+        db.clear(STORES.errosQuestoes),
+        db.clear(STORES.diagnosticosErro)
       ]);
     }
 
@@ -728,6 +793,31 @@ const db = {
         : null;
       await db.add(STORES.resumos, rest);
     }
+
+    // Mapa do id antigo de cada erro registrado -> novo id gerado. Necessário
+    // pra diagnosticosErro não perderem o vínculo com os erros que os
+    // originaram (erroIds) a cada sincronização/importação.
+    const listaErros = Array.isArray(data.errosQuestoes) ? data.errosQuestoes : [];
+    const listaDiagnosticos = Array.isArray(data.diagnosticosErro) ? data.diagnosticosErro : [];
+    const mapaErroId = {};
+    for (const e of listaErros) {
+      const { id, perfilId, tentativaId, ...rest } = e;
+      rest.tentativaId = tentativaId != null && mapaTentativaId[tentativaId] != null
+        ? mapaTentativaId[tentativaId]
+        : null;
+      const novoId = await db.add(STORES.errosQuestoes, rest);
+      if (id != null) mapaErroId[id] = novoId;
+    }
+    for (const d of listaDiagnosticos) {
+      const { id, perfilId, erroIds, ...rest } = d;
+      // Um diagnóstico sem nenhum erro correspondente ainda vale por si só
+      // (a recomendação continua útil) — mantém a lista vazia em vez de
+      // descartar o registro inteiro.
+      rest.erroIds = Array.isArray(erroIds)
+        ? erroIds.map(idAntigo => mapaErroId[idAntigo]).filter(v => v != null)
+        : [];
+      await db.add(STORES.diagnosticosErro, rest);
+    }
   },
 
   async zerarTudo() {
@@ -741,7 +831,9 @@ const db = {
       db.clear(STORES.cicloMaterias),
       db.clear(STORES.cicloSessoes),
       db.clear(STORES.cicloConfig),
-      db.clear(STORES.resumos)
+      db.clear(STORES.resumos),
+      db.clear(STORES.errosQuestoes),
+      db.clear(STORES.diagnosticosErro)
     ]);
   }
 };
