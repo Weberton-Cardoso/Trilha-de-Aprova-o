@@ -34,8 +34,17 @@ async function _salvarRevisao(item) {
     taxaAntes: item.taxa || 0,
     resumoId:  item.resumoId || null,
     tipoFonte: item.tipo,
-    cicloNome: item.cicloNome || null
+    cicloNome: item.cicloNome || null,
+    diagnosticoErroId: item.diagnosticoErroId || null
   });
+
+  // Se este item veio do Diagnóstico de Erros, fecha o ciclo: marca o
+  // diagnóstico como revisado lá também (ver analise-erros.js / /diagnostico).
+  if (item.diagnosticoErroId) {
+    const d = await db.diagnosticosErro.get(item.diagnosticoErroId);
+    if (d && d.status !== 'revisado') await db.diagnosticosErro.update({ ...d, status: 'revisado' });
+  }
+
   window.dispatchEvent(new CustomEvent('ta:mudou', { detail: { storeName: 'revisoes' } }));
   await reloadState();
 }
@@ -52,6 +61,50 @@ function calcFilaRevisao() {
     state.revisoes.filter(r => r.data === hoje)
       .map(r => _normRev(r.materia + '|' + (r.topico || '')))
   );
+  // Diagnósticos de erro já revisados hoje (dedupe por id, não por materia+tópico,
+  // já que vários diagnósticos podem compartilhar a mesma disciplina/assunto).
+  const diagnosticosJaHoje = new Set(
+    state.revisoes.filter(r => r.data === hoje && r.diagnosticoErroId != null)
+      .map(r => r.diagnosticoErroId)
+  );
+
+  const fila  = [];
+  const usados = new Set();
+
+  // 0) PRIORIDADE MÁXIMA: diagnósticos de erro ativos vindos da IA
+  //    (analise-erros.js). É o vínculo Diagnóstico de Erros → Revisão do Dia
+  //    → Caderno de Resumos pedido pelo usuário: cada padrão de erro ainda
+  //    ativo aparece aqui antes de qualquer item baseado só em taxa/dias,
+  //    porque já foi identificado como um problema concreto e específico.
+  const diagnosticosAtivos = (state.diagnosticosErro || [])
+    .filter(d => d.status === 'ativo' && !diagnosticosJaHoje.has(d.id))
+    .sort((a, b) => (a.criadoEm || '').localeCompare(b.criadoEm || ''));
+
+  for (const d of diagnosticosAtivos) {
+    if (fila.length >= REVISAO_POR_DIA) break;
+    const errosDoDiagnostico = (state.errosQuestoes || []).filter(e => (d.erroIds || []).includes(e.id));
+    // Se a IA já gerou um resumo completo pra este diagnóstico antes (via
+    // "Gerar resumo completo" abaixo), reaproveita o conteúdo salvo no
+    // Caderno em vez de perguntar de novo à IA todo santo dia.
+    const resumoExistente = d.resumoId ? state.resumos.find(r => r.id === d.resumoId) : null;
+
+    fila.push({
+      tipo: 'diagnostico',
+      diagnosticoErroId: d.id,
+      materia: d.disciplina || 'Diagnóstico de Erro',
+      topico: d.assunto || null,
+      disciplina: d.disciplina || 'Diagnóstico de Erro',
+      padrao: d.padrao,
+      recomendacao: d.recomendacao,
+      erros: errosDoDiagnostico,
+      resumoId: resumoExistente ? resumoExistente.id : null,
+      conteudoBruto: resumoExistente ? resumoExistente.textoBruto : null,
+      conteudoCondensado: resumoExistente ? resumoExistente.textoCondensado : null,
+      gerado: !!resumoExistente,
+      taxa: null, diasSemRevisar: null, peso: null, score: Infinity,
+      cicloNome: null, fonteLabel: '🎯 Diagnóstico de Erro (IA)'
+    });
+  }
 
   // 1) Pra cada matéria de cada ciclo, calcula score de urgência
   const candidatos = [];
@@ -94,9 +147,6 @@ function calcFilaRevisao() {
   });
 
   // 2) Para cada candidato, escolhe resumo do caderno ou agenda teoria
-  const fila  = [];
-  const usados = new Set();
-
   for (const c of candidatos) {
     if (fila.length >= REVISAO_POR_DIA) break;
 
@@ -164,6 +214,72 @@ Responda SOMENTE em JSON válido, sem markdown fora dos campos:
 {"teoria": "...", "pontosFracos": "...", "checklist": "..."}`;
 }
 
+/**
+ * Monta o prompt do resumo completo pra um item vindo do Diagnóstico de
+ * Erros — diferente do _promptTeorico (que parte só de disciplina/taxa),
+ * aqui a IA já recebe o padrão de erro específico e as questões que o
+ * embasaram, então o resumo sai direto no ponto que o aluno errou.
+ */
+function _promptResumoDiagnostico(item) {
+  const errosTexto = (item.erros || []).map((e, i) =>
+    `${i + 1}. ${e.enunciado ? e.enunciado.slice(0, 500) : '(enunciado não colado)'}\n   Resposta marcada: ${e.alternativaMarcada || '?'} | Gabarito: ${e.gabaritoCorreto || '?'}`
+  ).join('\n\n');
+
+  return `Você é um professor especialista em concurso público. A IA já analisou os erros do aluno e identificou o seguinte PADRÃO DE ERRO específico — agora você vai criar o resumo de estudo pra resolver esse ponto fraco.
+
+DISCIPLINA: ${item.disciplina}
+${item.topico ? `ASSUNTO: ${item.topico}` : ''}
+PADRÃO DE ERRO IDENTIFICADO: ${item.padrao}
+RECOMENDAÇÃO JÁ DADA AO ALUNO: ${item.recomendacao}
+
+${errosTexto ? `QUESTÕES QUE EMBASARAM ESSE DIAGNÓSTICO:\n\n${errosTexto}` : ''}
+
+Gere um resumo teórico PURO e DENSO, focado especificamente em resolver esse padrão de erro (não a disciplina inteira). Siga à risca:
+
+1. "teoria": explicação didática e direta do ponto exato que o aluno está errando — vá direto ao conceito/dispositivo/regra citada na recomendação, sem rodeios sobre o tema geral. Use **negrito** para termos-chave. Use listas numeradas quando enumerar requisitos/hipóteses.
+2. "pontosFracos": parágrafo curto (3-5 linhas) sobre a pegadinha específica que causa esse erro e como reconhecê-la numa prova.
+3. "checklist": 3 perguntas de auto-verificação numeradas sobre esse padrão específico (não sobre a disciplina em geral).
+
+Responda SOMENTE em JSON válido, sem markdown fora dos campos:
+{"teoria": "...", "pontosFracos": "...", "checklist": "..."}`;
+}
+
+/** Gera (via Gemini) e salva no Caderno de Resumos o resumo completo de um
+ *  item vindo do Diagnóstico de Erros. Vincula o resumo de volta ao
+ *  diagnóstico (diagnosticosErro.resumoId) e marca o resumo com
+ *  diagnosticoErroId, pra aparecer identificado no Caderno. */
+async function gerarResumoDiagnosticoIA(item) {
+  if (typeof window.chamarGeminiResumo !== 'function') {
+    throw new Error('IA não configurada. Acesse Configurações → Resolver com IA primeiro.');
+  }
+  const texto = await window.chamarGeminiResumo(_promptResumoDiagnostico(item));
+  const limpo = String(texto || '').replace(/```json|```/g, '').trim();
+  const parsed = JSON.parse(limpo);
+  const teoria = parsed.teoria || '';
+  const condensado = (parsed.pontosFracos || '') + (parsed.checklist ? '\n\n' + parsed.checklist : '');
+
+  const resumoId = await db.resumos.add({
+    materia: item.materia,
+    topico: item.topico || null,
+    data: todayISO(),
+    textoBruto: teoria,
+    textoCondensado: condensado.trim(),
+    tentativaId: null,
+    enunciado: null,
+    enviadoAnki: false,
+    ankiDeck: null,
+    origemRevisao: true,
+    diagnosticoErroId: item.diagnosticoErroId
+  });
+
+  if (item.diagnosticoErroId) {
+    const d = await db.diagnosticosErro.get(item.diagnosticoErroId);
+    if (d) await db.diagnosticosErro.update({ ...d, resumoId });
+  }
+
+  return { teoria, condensado: condensado.trim(), resumoId };
+}
+
 async function gerarResumoTeoricoIA(item) {
   if (typeof window.chamarGeminiResumo !== 'function') {
     throw new Error('IA não configurada. Acesse Configurações → Resolver com IA primeiro.');
@@ -228,6 +344,35 @@ function _htmlConteudoCaderno(item) {
   `;
 }
 
+function _htmlConteudoDiagnostico(item) {
+  return `
+    <div style="border-left:3px solid var(--gold);padding:10px 14px;background:var(--surface-2);border-radius:6px;margin-bottom:14px;">
+      <div style="font-size:13.5px;line-height:1.6;">${escapeHtml(item.recomendacao)}</div>
+    </div>
+    ${item.erros && item.erros.length ? `
+      <details style="margin-bottom:14px;">
+        <summary style="cursor:pointer;font-size:12.5px;color:var(--gold);font-weight:600;">📋 Questões que embasaram este diagnóstico (${item.erros.length})</summary>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
+          ${item.erros.map(e => `
+            <div style="background:var(--surface-2);border-radius:6px;padding:8px 10px;font-size:12.5px;">
+              ${e.enunciado ? `<div style="white-space:pre-wrap;color:var(--text-muted);margin-bottom:4px;">${escapeHtml(e.enunciado)}</div>` : ''}
+              <div class="text-muted">Sua resposta: ${escapeHtml(e.alternativaMarcada || '?')} · Gabarito: ${escapeHtml(e.gabaritoCorreto || '?')}</div>
+            </div>
+          `).join('')}
+        </div>
+      </details>` : ''}
+
+    ${item.gerado
+      ? _htmlConteudoTeorico(item)
+      : `<div style="text-align:center;padding:20px 10px;" id="revisao-teoria-wrap">
+           <p class="text-muted" style="font-size:13.5px;margin-bottom:16px;">Quer um resumo completo pra estudar esse ponto específico? A IA gera com base na recomendação e nas questões acima, e já salva no Caderno de Resumos.</p>
+           <button class="btn btn-primary" id="btn-gerar-teoria">✨ Gerar resumo completo</button>
+           <div id="revisao-teoria-gerada" style="display:none;text-align:left;"></div>
+         </div>`
+    }
+  `;
+}
+
 function _htmlConteudoTeorico(item) {
   return `
     <div id="revisao-texto-preview" style="line-height:1.7;font-size:14px;color:var(--text);">${_mdParaHtml(item.conteudoBruto)}</div>
@@ -280,9 +425,12 @@ function renderRevisao(view) {
   const atual  = Math.min(_revisaoIndice, total - 1);
   const item   = _revisaoFilaDoDia[atual];
   const pct    = (atual / total) * 100;
-  const taxaClass = item.taxa < 60 ? 'danger' : item.taxa < 75 ? 'muted' : 'success';
-  const diasTxt = item.diasSemRevisar === 0 ? 'Revisado hoje'
-    : `Última revisão: ${item.diasSemRevisar} dia${item.diasSemRevisar === 1 ? '' : 's'} atrás`;
+  const isDiagnostico = item.tipo === 'diagnostico';
+  const taxaClass = isDiagnostico ? 'info' : (item.taxa < 60 ? 'danger' : item.taxa < 75 ? 'muted' : 'success');
+  const diasTxt = isDiagnostico
+    ? `${(item.erros || []).length} questão${(item.erros || []).length === 1 ? '' : 'ões'} envolvida${(item.erros || []).length === 1 ? '' : 's'}`
+    : (item.diasSemRevisar === 0 ? 'Revisado hoje'
+      : `Última revisão: ${item.diasSemRevisar} dia${item.diasSemRevisar === 1 ? '' : 's'} atrás`);
 
   view.innerHTML = `
     <div class="revisao-container">
@@ -301,12 +449,14 @@ function renderRevisao(view) {
       </div>
 
       <!-- Cabeçalho da disciplina -->
-      <div class="card mb-12 revisao-header" style="border-left:4px solid var(--${taxaClass === 'danger' ? 'danger' : taxaClass === 'success' ? 'success' : 'border'});">
+      <div class="card mb-12 revisao-header" style="border-left:4px solid var(--${taxaClass === 'danger' ? 'danger' : taxaClass === 'success' ? 'success' : taxaClass === 'info' ? 'info' : 'border'});">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">
           <div>
-            <h2 style="margin:0 0 6px;font-size:20px;">${escapeHtml(item.disciplina)}</h2>
+            <h2 style="margin:0 0 6px;font-size:20px;">${escapeHtml(isDiagnostico ? item.padrao : item.disciplina)}</h2>
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-              <span class="badge ${taxaClass}">${fmtPct(item.taxa)} de acerto</span>
+              ${isDiagnostico
+                ? `<span class="badge info">${escapeHtml(item.disciplina)}</span>`
+                : `<span class="badge ${taxaClass}">${fmtPct(item.taxa)} de acerto</span>`}
               <span class="text-muted" style="font-size:12.5px;">${diasTxt}</span>
               ${item.cicloNome ? `<span class="text-muted" style="font-size:12px;">· ${escapeHtml(item.cicloNome)}</span>` : ''}
               ${item.peso ? `<span class="text-muted" style="font-size:12px;">· peso ${item.peso}</span>` : ''}
@@ -319,7 +469,9 @@ function renderRevisao(view) {
 
       <!-- Conteúdo -->
       <div id="revisao-conteudo" class="card mb-12" style="min-height:160px;">
-        ${item.tipo === 'caderno'
+        ${isDiagnostico
+          ? _htmlConteudoDiagnostico(item)
+          : item.tipo === 'caderno'
           ? _htmlConteudoCaderno(item)
           : `<div style="text-align:center;padding:30px 20px;" id="revisao-teoria-wrap">
                <p class="text-muted" style="font-size:13.5px;margin-bottom:16px;">Não há resumos do Caderno para esta disciplina.<br>Clique para gerar um resumo teórico com o Gemini.</p>
@@ -346,7 +498,7 @@ function renderRevisao(view) {
   $('#btn-pular-revisao')?.addEventListener('click', () => _avancar(view, item, false));
 
   // Listeners de edição (registra agora se o conteúdo já está visível)
-  if (item.tipo === 'caderno') _setupListenersEdicao(item);
+  if (item.tipo === 'caderno' || (isDiagnostico && item.gerado)) _setupListenersEdicao(item);
 
   if (item.tipo === 'teorico' && !item.gerado) {
     $('#btn-gerar-teoria')?.addEventListener('click', async () => {
@@ -391,6 +543,41 @@ function renderRevisao(view) {
 
       } catch (err) {
         showToast(err.message || 'Erro ao gerar resumo teórico.', 'danger');
+        if (btn) { btn.disabled = false; btn.textContent = '✨ Tentar de novo'; }
+      } finally {
+        _revisaoGerandoIA = false;
+      }
+    });
+  }
+
+  if (isDiagnostico && !item.gerado) {
+    $('#btn-gerar-teoria')?.addEventListener('click', async () => {
+      if (_revisaoGerandoIA) return;
+      _revisaoGerandoIA = true;
+      const btn = $('#btn-gerar-teoria');
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Gerando…'; }
+      try {
+        const ia = await gerarResumoDiagnosticoIA(item);
+        item.conteudoBruto = ia.teoria;
+        item.conteudoCondensado = ia.condensado;
+        item.resumoId = ia.resumoId;
+        item.gerado = true;
+        await reloadState();
+        showToast('Resumo salvo no Caderno de Resumos! 📓', 'success');
+
+        const wrap = $('#revisao-teoria-gerada');
+        if (wrap) {
+          wrap.style.display = 'block';
+          wrap.innerHTML = _htmlConteudoTeorico(item);
+        }
+        if (btn) btn.style.display = 'none';
+        const tituloWrap = $('#revisao-teoria-wrap > p');
+        if (tituloWrap) tituloWrap.style.display = 'none';
+
+        _setupListenersEdicao(item);
+
+      } catch (err) {
+        showToast(err.message || 'Erro ao gerar resumo.', 'danger');
         if (btn) { btn.disabled = false; btn.textContent = '✨ Tentar de novo'; }
       } finally {
         _revisaoGerandoIA = false;

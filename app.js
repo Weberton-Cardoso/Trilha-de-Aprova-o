@@ -108,6 +108,8 @@ const state = {
   perfis: [],
   resumos: [],
   revisoes: [],
+  errosQuestoes: [],
+  diagnosticosErro: [],
   dashboardFiltro: { tipo: '7d', inicio: null, fim: null },
   statsDisciplinaFiltro: { tipo: 'tudo', inicio: null, fim: null, disciplina: 'todas' }
 };
@@ -128,6 +130,9 @@ async function reloadState() {
   state.resumos = resumos;
   // revisoes: fallback seguro — funciona mesmo antes da migração v10
   try { state.revisoes = await db.revisoes.getAll(); } catch (_) { state.revisoes = []; }
+  // errosQuestoes/diagnosticosErro: fallback seguro — funciona mesmo antes da migração v11
+  try { state.errosQuestoes = await db.errosQuestoes.getAll(); } catch (_) { state.errosQuestoes = []; }
+  try { state.diagnosticosErro = await db.diagnosticosErro.getAll(); } catch (_) { state.diagnosticosErro = []; }
 }
 
 /** Disciplinas sugeridas por padrão no autocomplete, mesmo antes de qualquer

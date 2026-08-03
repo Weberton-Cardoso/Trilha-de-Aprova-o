@@ -209,6 +209,7 @@ function renderCaderno(view) {
                   <input type="checkbox" class="resumo-checkbox" data-resumo-id="${r.id}" title="Selecionar para leitura TTS" style="width:15px;height:15px;cursor:pointer;accent-color:var(--gold);">
                   <div style="font-size:12px;color:var(--text-muted);">
                     ${t ? `<b style="color:var(--text)">${escapeHtml(t.disciplina)}</b> · <span class="badge ${t.resultado === 'certa' ? 'success' : t.resultado === 'errada' ? 'danger' : 'muted'}">${t.resultado === 'certa' ? 'Certa' : t.resultado === 'errada' ? 'Errada' : 'Branco'}</span>` : '<span class="badge muted">Anotação Geral</span>'}
+                    ${r.diagnosticoErroId ? ` · <span class="badge info" title="Gerado a partir de um diagnóstico de erro na Revisão do Dia">🎯 Diagnóstico de Erro</span>` : ''}
                   </div>
                 </div>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
