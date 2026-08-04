@@ -86,7 +86,7 @@ const STORES = {
 const PERFIL_SCOPED_STORES = new Set([
   STORES.tentativas, STORES.editais, STORES.simulados,
   STORES.ciclos, STORES.cicloMaterias, STORES.cicloSessoes, STORES.resumos,
-  STORES.errosQuestoes, STORES.diagnosticosErro
+  STORES.errosQuestoes, STORES.diagnosticosErro, STORES.revisoes
 ]);
 
 const TIPOS_TENTATIVA = [
@@ -543,7 +543,7 @@ const db = {
   },
 
   async exportAll() {
-    const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos, errosQuestoes, diagnosticosErro] = await Promise.all([
+    const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos, errosQuestoes, diagnosticosErro, revisoes] = await Promise.all([
       db.getAll(STORES.tentativas),
       db.getAll(STORES.editais),
       db.getAll(STORES.simulados),
@@ -552,14 +552,15 @@ const db = {
       db.getAll(STORES.cicloSessoes),
       db.getAll(STORES.resumos),
       db.getAll(STORES.errosQuestoes),
-      db.getAll(STORES.diagnosticosErro)
+      db.getAll(STORES.diagnosticosErro),
+      db.getAll(STORES.revisoes)
     ]);
     return {
       versao: DB_VERSION,
       exportadoEm: new Date().toISOString(),
       alteradoEm: db.getUltimaAlteracaoLocal(),
       tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos,
-      errosQuestoes, diagnosticosErro
+      errosQuestoes, diagnosticosErro, revisoes
     };
   },
 
@@ -568,7 +569,7 @@ const db = {
    *  ser usado para um backup manual "de tudo", diferente do backup normal
    *  que exporta só o perfil ativo). */
   async exportAllRaw() {
-    const [perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos, errosQuestoes, diagnosticosErro] = await Promise.all([
+    const [perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos, errosQuestoes, diagnosticosErro, revisoes] = await Promise.all([
       tx(STORES.perfis, 'readonly', (store) => store.getAll()),
       tx(STORES.tentativas, 'readonly', (store) => store.getAll()),
       tx(STORES.editais, 'readonly', (store) => store.getAll()),
@@ -578,14 +579,15 @@ const db = {
       tx(STORES.cicloSessoes, 'readonly', (store) => store.getAll()),
       tx(STORES.resumos, 'readonly', (store) => store.getAll()),
       tx(STORES.errosQuestoes, 'readonly', (store) => store.getAll()),
-      tx(STORES.diagnosticosErro, 'readonly', (store) => store.getAll())
+      tx(STORES.diagnosticosErro, 'readonly', (store) => store.getAll()),
+      tx(STORES.revisoes, 'readonly', (store) => store.getAll())
     ]);
     return {
       versao: DB_VERSION,
       tipo: 'completo',
       exportadoEm: new Date().toISOString(),
       perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos,
-      errosQuestoes, diagnosticosErro
+      errosQuestoes, diagnosticosErro, revisoes
     };
   },
 
@@ -603,7 +605,8 @@ const db = {
       tx(STORES.cicloSessoes, 'readwrite', (store) => store.clear()),
       tx(STORES.resumos, 'readwrite', (store) => store.clear()),
       tx(STORES.errosQuestoes, 'readwrite', (store) => store.clear()),
-      tx(STORES.diagnosticosErro, 'readwrite', (store) => store.clear())
+      tx(STORES.diagnosticosErro, 'readwrite', (store) => store.clear()),
+      tx(STORES.revisoes, 'readwrite', (store) => store.clear())
     ]);
 
     const restaurar = (storeName, lista) =>
@@ -619,6 +622,7 @@ const db = {
     await restaurar(STORES.resumos, dados.resumos);
     await restaurar(STORES.errosQuestoes, dados.errosQuestoes);
     await restaurar(STORES.diagnosticosErro, dados.diagnosticosErro);
+    await restaurar(STORES.revisoes, dados.revisoes);
   },
 
   /** Encontra e corrige registros "invisíveis" — itens de stores com
@@ -633,7 +637,8 @@ const db = {
 
     const stores = [
       STORES.tentativas, STORES.editais, STORES.simulados,
-      STORES.ciclos, STORES.cicloMaterias, STORES.cicloSessoes, STORES.resumos
+      STORES.ciclos, STORES.cicloMaterias, STORES.cicloSessoes, STORES.resumos,
+      STORES.revisoes
     ];
 
     let totalReparados = 0;
@@ -694,7 +699,8 @@ const db = {
         db.clear(STORES.cicloConfig),
         db.clear(STORES.resumos),
         db.clear(STORES.errosQuestoes),
-        db.clear(STORES.diagnosticosErro)
+        db.clear(STORES.diagnosticosErro),
+        db.clear(STORES.revisoes)
       ]);
     }
 
@@ -721,6 +727,7 @@ const db = {
     const listaCicloMaterias = Array.isArray(data.cicloMaterias) ? data.cicloMaterias : [];
     const listaCicloSessoes = Array.isArray(data.cicloSessoes) ? data.cicloSessoes : [];
     const listaResumos = Array.isArray(data.resumos) ? data.resumos : [];
+    const listaRevisoes = Array.isArray(data.revisoes) ? data.revisoes : [];
 
     // Mapa do id antigo de cada tentativa -> novo id gerado. Necessário pra
     // resumos (Caderno) não perderem o vínculo com a questão de origem a
@@ -783,6 +790,10 @@ const db = {
       await db.add(STORES.cicloSessoes, rest);
     }
 
+    // Mapa do id antigo de cada resumo -> novo id gerado. Necessário pra
+    // revisoes (Revisão do Dia) não perderem o vínculo com o resumo do
+    // Caderno de origem a cada sincronização/importação.
+    const mapaResumoId = {};
     for (const r of listaResumos) {
       const { id, perfilId, tentativaId, ...rest } = r;
       // Diferente da sessão do ciclo, um resumo órfão (sem tentativa
@@ -791,7 +802,8 @@ const db = {
       rest.tentativaId = tentativaId != null && mapaTentativaId[tentativaId] != null
         ? mapaTentativaId[tentativaId]
         : null;
-      await db.add(STORES.resumos, rest);
+      const novoId = await db.add(STORES.resumos, rest);
+      if (id != null) mapaResumoId[id] = novoId;
     }
 
     // Mapa do id antigo de cada erro registrado -> novo id gerado. Necessário
@@ -808,6 +820,10 @@ const db = {
       const novoId = await db.add(STORES.errosQuestoes, rest);
       if (id != null) mapaErroId[id] = novoId;
     }
+    // Mapa do id antigo de cada diagnóstico -> novo id gerado. Necessário
+    // pra revisoes não perderem o vínculo com o diagnóstico de erro de
+    // origem a cada sincronização/importação.
+    const mapaDiagnosticoId = {};
     for (const d of listaDiagnosticos) {
       const { id, perfilId, erroIds, ...rest } = d;
       // Um diagnóstico sem nenhum erro correspondente ainda vale por si só
@@ -816,7 +832,22 @@ const db = {
       rest.erroIds = Array.isArray(erroIds)
         ? erroIds.map(idAntigo => mapaErroId[idAntigo]).filter(v => v != null)
         : [];
-      await db.add(STORES.diagnosticosErro, rest);
+      const novoId = await db.add(STORES.diagnosticosErro, rest);
+      if (id != null) mapaDiagnosticoId[id] = novoId;
+    }
+
+    // revisoes é cross-perfil por natureza (não tem perfilId salvo antes
+    // desta correção), mas ao reimportar mantém o vínculo com o resumo do
+    // Caderno e/ou o diagnóstico de erro que originaram cada revisão.
+    for (const r of listaRevisoes) {
+      const { id, perfilId, resumoId, diagnosticoErroId, ...rest } = r;
+      rest.resumoId = resumoId != null && mapaResumoId[resumoId] != null
+        ? mapaResumoId[resumoId]
+        : null;
+      rest.diagnosticoErroId = diagnosticoErroId != null && mapaDiagnosticoId[diagnosticoErroId] != null
+        ? mapaDiagnosticoId[diagnosticoErroId]
+        : null;
+      await db.add(STORES.revisoes, rest);
     }
   },
 
@@ -833,7 +864,8 @@ const db = {
       db.clear(STORES.cicloConfig),
       db.clear(STORES.resumos),
       db.clear(STORES.errosQuestoes),
-      db.clear(STORES.diagnosticosErro)
+      db.clear(STORES.diagnosticosErro),
+      db.clear(STORES.revisoes)
     ]);
   }
 };
