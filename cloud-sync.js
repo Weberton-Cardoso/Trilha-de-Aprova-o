@@ -373,16 +373,29 @@ const cloudSync = {
         return;
       }
 
-      // Trava por horário: se o dispositivo tem uma alteração local mais
-      // recente do que a última coisa que a nuvem recebeu (ex.: o envio
-      // anterior não deu tempo de terminar antes da página recarregar,
-      // como acontece logo após um deploy), NÃO baixa da nuvem — isso
-      // evitaria apagar dados novos que ainda não subiram. Só pula essa
-      // checagem se algum dos dois lados não tiver um horário registrado
-      // (dado antigo, de antes dessa proteção existir).
+      // Trava por horário: compara quando o dado local foi alterado pela
+      // última vez com o timestamp que a nuvem registrou na última vez que
+      // recebeu um envio.
+      //
+      // Casos possíveis:
+      //  1. Local mais novo que nuvem  → envia (não baixa)
+      //  2. Nuvem mais nova que local  → baixa normalmente
+      //  3. Local tem timestamp, nuvem não tem (dados antigos na nuvem,
+      //     de antes dessa proteção existir) → envia (dados locais mais completos)
+      //  4. Nenhum tem timestamp (instalação nova ou localStorage limpo)
+      //     → deixa passar, vai verificar pelo volume abaixo
       const alteracaoLocal = db.getUltimaAlteracaoLocal();
       const alteracaoNuvem = dadosNuvem.alteradoEm;
+
+      if (alteracaoLocal && !alteracaoNuvem) {
+        // Caso 3: nuvem antiga sem timestamp — local é mais confiável
+        console.warn('[cloud-sync] Nuvem sem timestamp de alteração, mas local tem. Enviando local para a nuvem.');
+        await this._enviarParaNuvem();
+        return;
+      }
+
       if (alteracaoLocal && alteracaoNuvem && new Date(alteracaoLocal) > new Date(alteracaoNuvem)) {
+        // Caso 1: local mais recente
         console.warn('[cloud-sync] Sincronização (baixar) pulada: os dados locais são mais recentes que os da nuvem. Enviando o local para a nuvem em vez de sobrescrevê-lo.');
         await this._enviarParaNuvem();
         return;
