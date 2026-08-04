@@ -62,9 +62,12 @@ async function _salvarRevisao(item) {
  */
 function calcFilaRevisao() {
   const hoje    = todayISO();
+  // CORREÇÃO: usar a mesma convenção de chave que a filtragem de resumos abaixo
+  // (r.topico || '(geral)') em vez de (r.topico || ''), para evitar que um
+  // resumo revisado hoje reapareça na fila como se não tivesse sido revisado.
   const jaHoje  = new Set(
     state.revisoes.filter(r => r.data === hoje)
-      .map(r => _normRev(r.materia + '|' + (r.topico || '')))
+      .map(r => _normRev(r.materia + '|' + (r.topico || '(geral)')))
   );
   // Diagnósticos de erro já revisados hoje (dedupe por id, não por materia+tópico,
   // já que vários diagnósticos podem compartilhar a mesma disciplina/assunto).
@@ -767,9 +770,46 @@ Responda com conteúdo adicional relevante em linguagem de caderno de estudos. U
 
 async function _avancar(view, item, marcar) {
   if (marcar) {
+    // CORREÇÃO 1: exige geração do resumo para diagnósticos também (não só teóricos)
     if (item.tipo === 'teorico' && !item.gerado) {
       showToast('Gere o resumo teórico antes de marcar como lido.', 'danger'); return;
     }
+    if (item.tipo === 'diagnostico' && !item.gerado) {
+      showToast('Gere o resumo completo antes de marcar como lido.', 'danger'); return;
+    }
+
+    // CORREÇÃO 2: se o usuário está com o textarea de edição aberto,
+    // salva automaticamente no Caderno antes de registrar a revisão
+    const textarea = $('#revisao-textarea');
+    if (textarea && textarea.style.display !== 'none') {
+      const novoTexto = textarea.value.trim();
+      if (novoTexto) {
+        item.conteudoBruto = novoTexto;
+        if (item.resumoId) {
+          const todos = await db.resumos.getAll();
+          const resumo = todos.find(r => r.id === item.resumoId);
+          if (resumo) {
+            resumo.textoBruto = novoTexto;
+            await db.resumos.update(resumo);
+          }
+        } else {
+          const novoId = await db.resumos.add({
+            materia: item.materia,
+            topico: item.topico || 'Visão Geral',
+            data: todayISO(),
+            textoBruto: novoTexto,
+            textoCondensado: item.conteudoCondensado || null,
+            tentativaId: null,
+            enunciado: null,
+            enviadoAnki: false,
+            ankiDeck: null,
+            origemRevisao: true
+          });
+          item.resumoId = novoId;
+        }
+      }
+    }
+
     await _salvarRevisao(item);
     showToast('Revisão registrada! 🧠', 'success');
   }
