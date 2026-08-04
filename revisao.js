@@ -173,7 +173,7 @@ function calcFilaRevisao() {
       fila.push({
         tipo: 'caderno', materia: c.nome, topico: resumo.topico || 'Geral',
         disciplina: c.nome, taxa: c.taxa, diasSemRevisar: c.diasSemRevisar,
-        peso: c.peso, score: c.score, totalQ: c.totalQ, cicloNome: ciclo => c.ciclo.nome,
+        peso: c.peso, score: c.score, totalQ: c.totalQ,
         cicloNome: c.ciclo.nome, resumoId: resumo.id,
         conteudoBruto: resumo.textoBruto, conteudoCondensado: resumo.textoCondensado,
         enunciado: resumo.enunciado, fonteLabel: '📄 Resumo de questão'
@@ -539,7 +539,7 @@ function renderRevisao(view) {
         // Salva automaticamente no Caderno de Resumos para uso futuro
         const novoId = await db.resumos.add({
           materia:          item.materia,
-          topico:           item.topico || null,
+          topico:           item.topico || 'Visão Geral',
           data:             todayISO(),
           textoBruto:       item.conteudoBruto,
           textoCondensado:  item.conteudoCondensado,
@@ -647,7 +647,7 @@ function _setupListenersEdicao(item) {
       if (resumo) { resumo.textoBruto = novoTexto; await db.resumos.update(resumo); }
     } else {
       const novoId = await db.resumos.add({
-        materia: item.materia, topico: item.topico || null,
+        materia: item.materia, topico: item.topico || 'Visão Geral',
         data: todayISO(), textoBruto: novoTexto,
         textoCondensado: item.conteudoCondensado || null,
         tentativaId: null, enunciado: null,
@@ -737,7 +737,7 @@ Responda com conteúdo adicional relevante em linguagem de caderno de estudos. U
             if (resumo) { resumo.textoBruto = item.conteudoBruto; await db.resumos.update(resumo); }
           } else {
             const novoId = await db.resumos.add({
-              materia: item.materia, topico: item.topico || null,
+              materia: item.materia, topico: item.topico || 'Visão Geral',
               data: todayISO(), textoBruto: item.conteudoBruto,
               textoCondensado: item.conteudoCondensado || null,
               tentativaId: null, enunciado: null,
