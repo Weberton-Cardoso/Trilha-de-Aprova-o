@@ -1,0 +1,283 @@
+/* ============================================================
+   MENTOR DA TRILHA — estilos
+   Adicione este bloco ao style.css (ou importe o arquivo separado).
+   ============================================================ */
+
+/* Loading */
+.mentor-loading {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: 3rem;
+  color: var(--text-muted, #888);
+  font-size: 1rem;
+}
+
+/* Hero */
+.mentor-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  background: var(--surface-1, #1a1a1a);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.mentor-hero-info {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
+
+.mentor-nome {
+  font-family: 'Sora', sans-serif;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+}
+
+.mentor-fase {
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--gold, #E8B14D);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.mentor-concurso {
+  font-size: .95rem;
+  color: var(--text-muted, #888);
+}
+
+/* Dial do Índice */
+.mentor-indice-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .3rem;
+  flex-shrink: 0;
+}
+
+.mentor-dial {
+  filter: drop-shadow(0 0 12px rgba(232,177,77,.2));
+}
+
+.mentor-indice-label {
+  font-family: 'Sora', sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.mentor-indice-desc {
+  font-size: .75rem;
+  color: var(--text-muted, #888);
+}
+
+/* Seções */
+.mentor-section {
+  background: var(--surface-1, #1a1a1a);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.mentor-section-title {
+  font-family: 'Sora', sans-serif;
+  font-size: .95rem;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+  margin-bottom: 1rem;
+  letter-spacing: .02em;
+}
+
+/* Componentes do Índice */
+.mentor-componentes {
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+}
+
+.mentor-comp-item {
+  display: grid;
+  grid-template-columns: 140px 1fr 36px;
+  align-items: center;
+  gap: .75rem;
+}
+
+.mentor-comp-nome {
+  font-size: .82rem;
+  color: var(--text-muted, #888);
+}
+
+.mentor-comp-barra-wrap {
+  background: var(--surface-2, #2a2a2a);
+  border-radius: 4px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.mentor-comp-barra {
+  height: 100%;
+  border-radius: 4px;
+  transition: width .5s ease;
+}
+
+.mentor-comp-valor {
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+  text-align: right;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Lacunas */
+.mentor-lacunas {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.mentor-lacuna-item {
+  background: var(--surface-2, #2a2a2a);
+  border-radius: 8px;
+  padding: .75rem 1rem;
+  border-left: 3px solid #F87171;
+}
+
+.mentor-lacuna-nome {
+  font-weight: 600;
+  font-size: .9rem;
+  color: var(--text-primary, #fff);
+  margin-bottom: .2rem;
+}
+
+.mentor-lacuna-detalhes {
+  font-size: .8rem;
+  color: var(--text-muted, #888);
+}
+
+/* Formulário de perfil */
+.mentor-form {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+
+/* Output da IA */
+.mentor-ia-output {
+  background: var(--surface-2, #2a2a2a);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  font-size: .92rem;
+  line-height: 1.7;
+  color: var(--text-primary, #fff);
+  min-height: 60px;
+}
+
+/* Diário */
+.mentor-diario-entrada {
+  border-bottom: 1px solid var(--border, #2a2a2a);
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+}
+
+.mentor-diario-entrada:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.mentor-diario-data {
+  font-size: .78rem;
+  font-weight: 700;
+  color: var(--gold, #E8B14D);
+  margin-bottom: .5rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.mentor-diario-texto {
+  font-size: .88rem;
+  line-height: 1.65;
+  color: var(--text-secondary, #ccc);
+}
+
+/* ============================================================
+   COACH PÓS-SESSÃO — card flutuante
+   ============================================================ */
+.coach-card {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  width: 320px;
+  max-width: calc(100vw - 2rem);
+  background: var(--surface-1, #1e1e1e);
+  border: 1px solid var(--gold, #E8B14D);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5);
+  z-index: 9999;
+  animation: coachSlideIn .35s cubic-bezier(.22,1,.36,1);
+  overflow: hidden;
+}
+
+@keyframes coachSlideIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.coach-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .75rem 1rem .5rem;
+  font-family: 'Sora', sans-serif;
+  font-size: .85rem;
+  font-weight: 700;
+  color: var(--gold, #E8B14D);
+  border-bottom: 1px solid var(--border, #2a2a2a);
+}
+
+.btn-close-coach {
+  background: none;
+  border: none;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0;
+  line-height: 1;
+  transition: color .15s;
+}
+
+.btn-close-coach:hover { color: var(--text-primary, #fff); }
+
+.coach-card-body {
+  padding: .75rem 1rem;
+  font-size: .87rem;
+  line-height: 1.6;
+  color: var(--text-secondary, #ccc);
+}
+
+.coach-card-body p {
+  margin: 0 0 .4rem;
+}
+
+.coach-card-body p:last-child { margin-bottom: 0; }
+
+.coach-card-footer {
+  padding: .5rem 1rem .75rem;
+  border-top: 1px solid var(--border, #2a2a2a);
+}
+
+/* Responsivo */
+@media (max-width: 640px) {
+  .mentor-hero { flex-direction: column; align-items: flex-start; }
+  .mentor-indice-wrap { flex-direction: row; align-items: center; gap: 1rem; }
+  .mentor-comp-item { grid-template-columns: 110px 1fr 30px; }
+  .coach-card { bottom: .75rem; right: .75rem; left: .75rem; width: auto; }
+}

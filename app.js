@@ -356,6 +356,7 @@ const PAGE_TITLES = {
   'revisao': 'Revisão do Dia',
   'evolucao-revisao': 'Evolução da Revisão',
   'diagnostico': 'Diagnóstico de Erros',
+  'mentor': 'Mentor da Trilha',
   'estatisticas/disciplinas': 'Estatísticas por Disciplina',
   'estatisticas/assuntos': 'Estatísticas por Assunto',
   'estatisticas/bancas': 'Estatísticas por Banca',
@@ -469,6 +470,10 @@ async function router() {
     $('#page-title').textContent = PAGE_TITLES['evolucao-revisao'];
     updateActiveNav('revisao');
     if (typeof renderEvolucaoRevisao === 'function') renderEvolucaoRevisao(view);
+  } else if (base === 'mentor') {
+    $('#page-title').textContent = PAGE_TITLES['mentor'];
+    updateActiveNav('mentor');
+    if (typeof renderMentor === 'function') renderMentor(view);
   } else if (base === 'diagnostico') {
     $('#page-title').textContent = PAGE_TITLES['diagnostico'];
     updateActiveNav('diagnostico');

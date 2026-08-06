@@ -45,6 +45,9 @@
  *     tentativas, não exige migração de schema.
  * v10: Sistema de Revisão do Dia — rastreia revisões concluídas por tema.
  * v11: DIAGNÓSTICO DE ERROS (padrão de erro + recomendação da IA). Cria dois
+ * v12: MENTOR DA TRILHA. Cria o store "learningProfile" (escopo por perfil):
+ *      base de conhecimento do aluno — concurso-alvo, pontos fortes/fracos,
+ *      diário do mentor, histórico de recomendações.
  *     stores novos:
  *     - "errosQuestoes": um registro por QUESTÃO ERRADA individual, vinda de
  *       qualquer tela (Resolver com IA, Ciclo de Estudos, Simulados,
@@ -63,7 +66,7 @@
  */
 
 const DB_NAME = 'TrilhaAprovacaoDB';
-const DB_VERSION = 11;
+const DB_VERSION = 12;
 
 const STORES = {
   tentativas: 'tentativas',
@@ -78,7 +81,8 @@ const STORES = {
   resumos: 'resumos',
   revisoes: 'revisoes',
   errosQuestoes: 'errosQuestoes',
-  diagnosticosErro: 'diagnosticosErro'
+  diagnosticosErro: 'diagnosticosErro',
+  learningProfile: 'learningProfile'
 };
 
 /** Stores que pertencem a um perfil de estatísticas específico — getAll/add/clear
@@ -86,7 +90,8 @@ const STORES = {
 const PERFIL_SCOPED_STORES = new Set([
   STORES.tentativas, STORES.editais, STORES.simulados,
   STORES.ciclos, STORES.cicloMaterias, STORES.cicloSessoes, STORES.resumos,
-  STORES.errosQuestoes, STORES.diagnosticosErro, STORES.revisoes
+  STORES.revisoes, STORES.errosQuestoes, STORES.diagnosticosErro,
+  STORES.learningProfile
 ]);
 
 const TIPOS_TENTATIVA = [
@@ -301,6 +306,13 @@ function openDB() {
         revisoesStore.createIndex('disciplina', 'disciplina', { unique: false });
       }
 
+      // v12: learningProfile — base de conhecimento do aluno para o Mentor da Trilha.
+      // Um documento por perfil (perfilId injetado automaticamente pelo PERFIL_SCOPED_STORES).
+      // Armazena: concurso-alvo, pontos fortes/fracos, histórico de recomendações, diário.
+      if (!db.objectStoreNames.contains(STORES.learningProfile)) {
+        db.createObjectStore(STORES.learningProfile, { keyPath: 'id', autoIncrement: true });
+      }
+
       // v11: Diagnóstico de Erros — ver comentário no topo do arquivo.
       if (!db.objectStoreNames.contains(STORES.errosQuestoes)) {
         const errosStore = db.createObjectStore(STORES.errosQuestoes, { keyPath: 'id', autoIncrement: true });
@@ -501,6 +513,15 @@ const db = {
     clear: () => db.clear(STORES.revisoes)
   },
 
+  // Base de conhecimento do aluno — Mentor da Trilha (v12).
+  // 1 documento por perfil; use db.learningProfile.getAll()[0] para ler.
+  learningProfile: {
+    add:    (p) => db.add(STORES.learningProfile, p),
+    update: (p) => db.update(STORES.learningProfile, p),
+    getAll: () => db.getAll(STORES.learningProfile),
+    clear:  () => db.clear(STORES.learningProfile)
+  },
+
   // Diagnóstico de Erros (v11) — ver analise-erros.js.
   errosQuestoes: {
     add: (e) => db.add(STORES.errosQuestoes, e),
@@ -543,7 +564,8 @@ const db = {
   },
 
   async exportAll() {
-    const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos, errosQuestoes, diagnosticosErro, revisoes] = await Promise.all([
+    const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes,
+           resumos, errosQuestoes, diagnosticosErro, learningProfile] = await Promise.all([
       db.getAll(STORES.tentativas),
       db.getAll(STORES.editais),
       db.getAll(STORES.simulados),
@@ -553,14 +575,14 @@ const db = {
       db.getAll(STORES.resumos),
       db.getAll(STORES.errosQuestoes),
       db.getAll(STORES.diagnosticosErro),
-      db.getAll(STORES.revisoes)
+      db.getAll(STORES.learningProfile)
     ]);
     return {
       versao: DB_VERSION,
       exportadoEm: new Date().toISOString(),
       alteradoEm: db.getUltimaAlteracaoLocal(),
       tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos,
-      errosQuestoes, diagnosticosErro, revisoes
+      errosQuestoes, diagnosticosErro, learningProfile
     };
   },
 
@@ -569,7 +591,8 @@ const db = {
    *  ser usado para um backup manual "de tudo", diferente do backup normal
    *  que exporta só o perfil ativo). */
   async exportAllRaw() {
-    const [perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos, errosQuestoes, diagnosticosErro, revisoes] = await Promise.all([
+    const [perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes,
+           resumos, errosQuestoes, diagnosticosErro, learningProfile] = await Promise.all([
       tx(STORES.perfis, 'readonly', (store) => store.getAll()),
       tx(STORES.tentativas, 'readonly', (store) => store.getAll()),
       tx(STORES.editais, 'readonly', (store) => store.getAll()),
@@ -580,14 +603,14 @@ const db = {
       tx(STORES.resumos, 'readonly', (store) => store.getAll()),
       tx(STORES.errosQuestoes, 'readonly', (store) => store.getAll()),
       tx(STORES.diagnosticosErro, 'readonly', (store) => store.getAll()),
-      tx(STORES.revisoes, 'readonly', (store) => store.getAll())
+      tx(STORES.learningProfile, 'readonly', (store) => store.getAll())
     ]);
     return {
       versao: DB_VERSION,
       tipo: 'completo',
       exportadoEm: new Date().toISOString(),
       perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos,
-      errosQuestoes, diagnosticosErro, revisoes
+      errosQuestoes, diagnosticosErro, learningProfile
     };
   },
 
@@ -606,7 +629,7 @@ const db = {
       tx(STORES.resumos, 'readwrite', (store) => store.clear()),
       tx(STORES.errosQuestoes, 'readwrite', (store) => store.clear()),
       tx(STORES.diagnosticosErro, 'readwrite', (store) => store.clear()),
-      tx(STORES.revisoes, 'readwrite', (store) => store.clear())
+      tx(STORES.learningProfile, 'readwrite', (store) => store.clear())
     ]);
 
     const restaurar = (storeName, lista) =>
@@ -622,7 +645,7 @@ const db = {
     await restaurar(STORES.resumos, dados.resumos);
     await restaurar(STORES.errosQuestoes, dados.errosQuestoes);
     await restaurar(STORES.diagnosticosErro, dados.diagnosticosErro);
-    await restaurar(STORES.revisoes, dados.revisoes);
+    await restaurar(STORES.learningProfile, dados.learningProfile);
   },
 
   /** Encontra e corrige registros "invisíveis" — itens de stores com
@@ -637,8 +660,7 @@ const db = {
 
     const stores = [
       STORES.tentativas, STORES.editais, STORES.simulados,
-      STORES.ciclos, STORES.cicloMaterias, STORES.cicloSessoes, STORES.resumos,
-      STORES.revisoes
+      STORES.ciclos, STORES.cicloMaterias, STORES.cicloSessoes, STORES.resumos
     ];
 
     let totalReparados = 0;
@@ -699,8 +721,7 @@ const db = {
         db.clear(STORES.cicloConfig),
         db.clear(STORES.resumos),
         db.clear(STORES.errosQuestoes),
-        db.clear(STORES.diagnosticosErro),
-        db.clear(STORES.revisoes)
+        db.clear(STORES.diagnosticosErro)
       ]);
     }
 
@@ -727,7 +748,6 @@ const db = {
     const listaCicloMaterias = Array.isArray(data.cicloMaterias) ? data.cicloMaterias : [];
     const listaCicloSessoes = Array.isArray(data.cicloSessoes) ? data.cicloSessoes : [];
     const listaResumos = Array.isArray(data.resumos) ? data.resumos : [];
-    const listaRevisoes = Array.isArray(data.revisoes) ? data.revisoes : [];
 
     // Mapa do id antigo de cada tentativa -> novo id gerado. Necessário pra
     // resumos (Caderno) não perderem o vínculo com a questão de origem a
@@ -790,10 +810,6 @@ const db = {
       await db.add(STORES.cicloSessoes, rest);
     }
 
-    // Mapa do id antigo de cada resumo -> novo id gerado. Necessário pra
-    // revisoes (Revisão do Dia) não perderem o vínculo com o resumo do
-    // Caderno de origem a cada sincronização/importação.
-    const mapaResumoId = {};
     for (const r of listaResumos) {
       const { id, perfilId, tentativaId, ...rest } = r;
       // Diferente da sessão do ciclo, um resumo órfão (sem tentativa
@@ -802,8 +818,7 @@ const db = {
       rest.tentativaId = tentativaId != null && mapaTentativaId[tentativaId] != null
         ? mapaTentativaId[tentativaId]
         : null;
-      const novoId = await db.add(STORES.resumos, rest);
-      if (id != null) mapaResumoId[id] = novoId;
+      await db.add(STORES.resumos, rest);
     }
 
     // Mapa do id antigo de cada erro registrado -> novo id gerado. Necessário
@@ -820,10 +835,6 @@ const db = {
       const novoId = await db.add(STORES.errosQuestoes, rest);
       if (id != null) mapaErroId[id] = novoId;
     }
-    // Mapa do id antigo de cada diagnóstico -> novo id gerado. Necessário
-    // pra revisoes não perderem o vínculo com o diagnóstico de erro de
-    // origem a cada sincronização/importação.
-    const mapaDiagnosticoId = {};
     for (const d of listaDiagnosticos) {
       const { id, perfilId, erroIds, ...rest } = d;
       // Um diagnóstico sem nenhum erro correspondente ainda vale por si só
@@ -832,22 +843,7 @@ const db = {
       rest.erroIds = Array.isArray(erroIds)
         ? erroIds.map(idAntigo => mapaErroId[idAntigo]).filter(v => v != null)
         : [];
-      const novoId = await db.add(STORES.diagnosticosErro, rest);
-      if (id != null) mapaDiagnosticoId[id] = novoId;
-    }
-
-    // revisoes é cross-perfil por natureza (não tem perfilId salvo antes
-    // desta correção), mas ao reimportar mantém o vínculo com o resumo do
-    // Caderno e/ou o diagnóstico de erro que originaram cada revisão.
-    for (const r of listaRevisoes) {
-      const { id, perfilId, resumoId, diagnosticoErroId, ...rest } = r;
-      rest.resumoId = resumoId != null && mapaResumoId[resumoId] != null
-        ? mapaResumoId[resumoId]
-        : null;
-      rest.diagnosticoErroId = diagnosticoErroId != null && mapaDiagnosticoId[diagnosticoErroId] != null
-        ? mapaDiagnosticoId[diagnosticoErroId]
-        : null;
-      await db.add(STORES.revisoes, rest);
+      await db.add(STORES.diagnosticosErro, rest);
     }
   },
 
@@ -864,8 +860,7 @@ const db = {
       db.clear(STORES.cicloConfig),
       db.clear(STORES.resumos),
       db.clear(STORES.errosQuestoes),
-      db.clear(STORES.diagnosticosErro),
-      db.clear(STORES.revisoes)
+      db.clear(STORES.diagnosticosErro)
     ]);
   }
 };
