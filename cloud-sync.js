@@ -216,9 +216,16 @@ const cloudSync = {
     const dados = resposta.dados;
 
     this._ignorarProximosEventos = true;
-    await db.criarBackupLocalAutomatico('antes_de_restaurar_backup_nuvem').catch(() => {});
-    await db.importAll(dados, { substituir: true });
-    this._ignorarProximosEventos = false;
+    try {
+      await db.criarBackupLocalAutomatico('antes_de_restaurar_backup_nuvem').catch(() => {});
+      await db.importAll(dados, { substituir: true });
+    } finally {
+      // Precisa ser 'finally': se db.importAll() lançar erro no meio do
+      // caminho, sem isso _ignorarProximosEventos fica travado em 'true'
+      // pra sempre (só se resolveria sozinho recarregando a página) —
+      // e enquanto isso NENHUMA mudança local sobe pra nuvem, silenciosamente.
+      this._ignorarProximosEventos = false;
+    }
   },
 
   async _enviarParaNuvem() {
@@ -253,8 +260,19 @@ const cloudSync = {
       // próprio throttle (1x/hora) e nunca deve travar a sincronização
       // principal caso falhe por qualquer motivo (token expirado, etc.).
       this.backupParaDrive();
+
+      // Sincronização deu certo — limpa qualquer aviso de falha anterior.
+      this._falhasSeguidasEnvio = 0;
     } catch (err) {
       console.error('Erro ao enviar dados para a nuvem:', err);
+      // Antes essa falha era 100% silenciosa (só console.error) — dava pra
+      // passar dias sem sincronizar sem ninguém perceber, como aconteceu.
+      // Só avisa depois da 2ª falha seguida pra não incomodar por causa
+      // de uma instabilidade de rede pontual de 1 tentativa isolada.
+      this._falhasSeguidasEnvio = (this._falhasSeguidasEnvio || 0) + 1;
+      if (this._falhasSeguidasEnvio >= 2 && typeof showToast === 'function') {
+        showToast('Não foi possível sincronizar com a nuvem. Seus dados continuam salvos neste aparelho.', 'warning');
+      }
     }
   },
 
