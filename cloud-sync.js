@@ -157,12 +157,17 @@ const cloudSync = {
   async _workerFetch(path, options = {}) {
     if (!this.usuarioAtual) throw new Error('Não há usuário logado.');
     const idToken = await this.usuarioAtual.getIdToken();
+    // Se o caller já passou Content-Type (ex.: application/gzip), usa o
+    // dele — só define application/json como padrão se body for string.
+    const callerContentType = (options.headers || {})['Content-Type'];
+    const defaultContentType = (options.body && typeof options.body === 'string') ? 'application/json' : null;
+    const contentTypeHeader = callerContentType || defaultContentType;
     const resp = await fetch(`${WORKER_URL}${path}`, {
       ...options,
       headers: {
         ...(options.headers || {}),
         Authorization: `Bearer ${idToken}`,
-        ...(options.body ? { 'Content-Type': 'application/json' } : {})
+        ...(contentTypeHeader ? { 'Content-Type': contentTypeHeader } : {})
       }
     });
     if (!resp.ok) {
@@ -193,6 +198,59 @@ const cloudSync = {
     if (!dados) return 0;
     const chaves = ['tentativas', 'editais', 'simulados', 'ciclos', 'cicloMaterias', 'cicloSessoes'];
     return chaves.reduce((soma, chave) => soma + (Array.isArray(dados[chave]) ? dados[chave].length : 0), 0);
+  },
+
+  /**
+   * Exporta TODOS os stores e comprime com gzip antes de enviar.
+   *
+   * Por que compressão em vez de excluir stores?
+   *   Os stores de texto longo (resumos, errosQuestoes, diagnosticosErro,
+   *   revisoes) precisam sincronizar entre dispositivos — excluí-los do
+   *   sync significa perder dados ao trocar de aparelho ou limpar o
+   *   navegador. A compressão resolve o problema na raiz: um JSON de 2MB
+   *   de resumos vira ~250KB comprimido, bem dentro do limite de 1MB do
+   *   Worker.
+   *
+   * Como funciona:
+   *   1. db.exportAll() gera o JSON completo (todos os stores)
+   *   2. CompressionStream('gzip') comprime o texto
+   *   3. O resultado é um Blob binário que vai no corpo do PUT
+   *   4. O Worker recebe, detecta o Content-Type e descomprime
+   *      (ver worker.js — precisa aceitar 'application/gzip')
+   *   5. Na descida (_puxarDaNuvem), o Worker já devolve JSON normal
+   *      (ele descomprime antes de responder ao GET /dados)
+   *
+   * Fallback: se CompressionStream não estiver disponível (Safari < 16.4,
+   * alguns WebViews antigos), envia o JSON puro sem compressão — nesse
+   * caso o limite de 1MB ainda vale, mas é improvável estourar com só
+   * os stores leves.
+   */
+  async _exportarComprimido() {
+    const todos = await db.exportAll();
+    const json  = JSON.stringify(todos);
+
+    if (typeof CompressionStream === 'undefined') {
+      // Fallback: sem compressão — envia JSON puro
+      console.warn('[cloud-sync] CompressionStream indisponível — enviando sem compressão.');
+      return { body: json, contentType: 'application/json', tamanhoKB: Math.round(json.length / 1024) };
+    }
+
+    const stream   = new CompressionStream('gzip');
+    const writer   = stream.writable.getWriter();
+    const encoder  = new TextEncoder();
+    writer.write(encoder.encode(json));
+    writer.close();
+
+    const chunks = [];
+    const reader = stream.readable.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+
+    const blob = new Blob(chunks, { type: 'application/gzip' });
+    return { body: blob, contentType: 'application/gzip', tamanhoKB: Math.round(blob.size / 1024) };
   },
 
   /** Lista os backups salvos no D1 (mais recentes primeiro), para a
@@ -231,17 +289,24 @@ const cloudSync = {
   async _enviarParaNuvem() {
     if (!this.usuarioAtual) return;
     try {
-      const dados = await db.exportAll();
-      const totalLocal = this._totalItens(dados);
+      // Comprime todos os stores (incluindo resumos, errosQuestoes,
+      // diagnosticosErro, revisoes) antes de enviar. Ver _exportarComprimido().
+      const { body, contentType, tamanhoKB } = await this._exportarComprimido();
+
+      if (tamanhoKB > 900) {
+        console.warn(`[cloud-sync] Payload grande: ${tamanhoKB}KB comprimido.`);
+      }
+
+      // _totalItens usa só os stores leves pra verificar se o pacote está vazio
+      const dadosVerif = await db.exportAll();
+      const totalLocal = this._totalItens(dadosVerif);
 
       if (totalLocal === 0) {
-        // Confere se a nuvem já tem dados antes de decidir se é seguro
-        // enviar um pacote vazio (evita apagar a nuvem sem querer).
         let totalNuvemAtual = 0;
         try {
           const respostaAtual = await this._workerFetch('/dados');
           if (respostaAtual.existe) totalNuvemAtual = this._totalItens(respostaAtual.dados);
-        } catch (_) { /* se falhar em checar, segue com cautela abaixo mesmo assim */ }
+        } catch (_) {}
 
         if (totalNuvemAtual > 0) {
           console.warn('[cloud-sync] Envio abortado: dados locais vazios, mas a nuvem tem dados. Preservando a nuvem.');
@@ -250,25 +315,17 @@ const cloudSync = {
         }
       }
 
-      // O Worker já guarda um backup do estado anterior automaticamente
-      // antes de sobrescrever (ver worker.js, rota PUT /dados) — não
-      // precisa fazer esse snapshot manualmente aqui como fazíamos com o
-      // Firestore.
-      await this._workerFetch('/dados', { method: 'PUT', body: JSON.stringify(dados) });
+      // Envia com o Content-Type correto (gzip ou json no fallback)
+      await this._workerFetch('/dados', {
+        method: 'PUT',
+        body,
+        headers: { 'Content-Type': contentType }
+      });
 
-      // Dispara em paralelo, sem esperar nem deixar erro subir — tem seu
-      // próprio throttle (1x/hora) e nunca deve travar a sincronização
-      // principal caso falhe por qualquer motivo (token expirado, etc.).
       this.backupParaDrive();
-
-      // Sincronização deu certo — limpa qualquer aviso de falha anterior.
       this._falhasSeguidasEnvio = 0;
     } catch (err) {
       console.error('Erro ao enviar dados para a nuvem:', err);
-      // Antes essa falha era 100% silenciosa (só console.error) — dava pra
-      // passar dias sem sincronizar sem ninguém perceber, como aconteceu.
-      // Só avisa depois da 2ª falha seguida pra não incomodar por causa
-      // de uma instabilidade de rede pontual de 1 tentativa isolada.
       this._falhasSeguidasEnvio = (this._falhasSeguidasEnvio || 0) + 1;
       if (this._falhasSeguidasEnvio >= 2 && typeof showToast === 'function') {
         showToast('Não foi possível sincronizar com a nuvem. Seus dados continuam salvos neste aparelho.', 'warning');
@@ -337,14 +394,22 @@ const cloudSync = {
 
     try {
       const folderId = await this._obterOuCriarPastaDrive();
-      const dados = await db.exportAll();
-      const nomeArquivo = `backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      // Usa compressão — inclui todos os stores (resumos, erros etc.)
+      const { body: dadosBody, contentType } = await this._exportarComprimido();
+      const nomeArquivo = `backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json.gz`;
 
       const metadata = { name: nomeArquivo, parents: [folderId] };
       const boundary = 'trilha_' + Math.random().toString(36).slice(2);
-      const corpo =
-        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
-        `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(dados)}\r\n--${boundary}--`;
+
+      // Monta multipart manualmente com o blob comprimido como segunda parte
+      const metaStr = JSON.stringify(metadata);
+      const metaPart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metaStr}\r\n`;
+      const mediaPart = `--${boundary}\r\nContent-Type: ${contentType}\r\n\r\n`;
+      const ending = `\r\n--${boundary}--`;
+
+      const corpo = new Blob([
+        metaPart, mediaPart, dadosBody, ending
+      ], { type: `multipart/related; boundary=${boundary}` });
 
       const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
         method: 'POST',

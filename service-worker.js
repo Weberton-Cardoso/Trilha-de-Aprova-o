@@ -4,7 +4,7 @@
  * (dados ficam no IndexedDB, não no cache).
  */
 
-const CACHE_NAME = 'trilha-aprovacao-v84';
+const CACHE_NAME = 'trilha-aprovacao-v86';
 
 const ASSETS_TO_CACHE = [
   './',
@@ -23,6 +23,8 @@ const ASSETS_TO_CACHE = [
   './simulados.js',
   './estatisticas.js',
   './caderno.js',
+  './learning-engine.js',
+  './mentor-ia.js',
   './analise-erros.js',
   './configuracoes.js',
   './tts-modulo.js',
