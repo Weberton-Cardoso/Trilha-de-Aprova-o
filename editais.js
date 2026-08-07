@@ -698,19 +698,10 @@ function calcStatusAutomaticoTopico(nomeTopico, nomeDisciplina) {
   return { status, taxa, dias, tentativas: resumo.tentativas, questoes: resumo.total, coberto };
 }
 
-/** Status "efetivo" de um tópico na Bússola: se o usuário marcou manualmente
- *  (via clique no badge), essa marcação prevalece sobre o cálculo automático
- *  baseado em tentativas. Caso contrário, cai no cálculo automático normal. */
+/** Status efetivo do tópico: statusManual prevalece sobre o cálculo automático. */
 function calcStatusEfetivoTopico(t, nomeDisciplina) {
   if (t.statusManual) {
-    return {
-      status: t.statusManual,
-      taxa: null,
-      dias: null,
-      tentativas: 0,
-      questoes: 0,
-      coberto: t.statusManual !== 'nao_visto'
-    };
+    return { status: t.statusManual, taxa: null, dias: null, tentativas: 0, questoes: 0, coberto: t.statusManual !== 'nao_visto' };
   }
   return calcStatusAutomaticoTopico(t.nome, nomeDisciplina);
 }
@@ -739,7 +730,7 @@ const _STATUS_BUSSOLA = {
 let _bussolaEditalId  = null;
 let _bussolaFiltro    = 'todos';   // 'todos' | 'critico' | 'revisar' | 'nao_visto'
 let _bussolaExpandido = new Set(); // ids de disciplinas expandidas
-let _bussolaEditando  = null;      // { tipo: 'materia'|'topico', mi, ti } — item em edição inline no momento
+let _bussolaEditando  = null;      // { tipo: 'materia'|'topico', mi, ti }
 
 function renderEditalDetalhe(view, idStr) {
   const id = Number(idStr);
@@ -871,21 +862,18 @@ function renderEditalDetalhe(view, idStr) {
       if (_bussolaFiltro !== 'todos' && !topicosFiltrados.length) return '';
 
       const editandoMateria = _bussolaEditando && _bussolaEditando.tipo === 'materia' && _bussolaEditando.mi === mi;
-
-      const nomeMateriaHtml = editandoMateria ? `
-        <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">
-          <input type="text" class="input bussola-edit-input" data-input-nome-materia="${mi}" value="${escapeHtml(m.nome)}"
-            style="font-size:14px;padding:4px 8px;flex:1;min-width:0;" />
-          <button class="btn btn-ghost btn-sm" data-salvar-materia="${mi}" title="Salvar">✓</button>
-          <button class="btn btn-ghost btn-sm" data-cancelar-edicao title="Cancelar">✕</button>
-        </div>
-      ` : `
-        <div style="font-size:15px;font-weight:700;font-family:var(--font-display);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-          <span>${escapeHtml(m.nome)}</span>
-          <button class="bussola-icon-btn" data-editar-materia="${mi}" title="Editar disciplina" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;line-height:1;opacity:.75;">✏️</button>
-          <button class="bussola-icon-btn" data-deletar-materia="${mi}" title="Excluir disciplina" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;line-height:1;opacity:.75;">🗑️</button>
-        </div>
-      `;
+      const nomeMateriaHtml = editandoMateria
+        ? `<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">
+             <input type="text" class="input bussola-edit-input" data-input-nome-materia="${mi}" value="${escapeHtml(m.nome)}"
+               style="font-size:14px;padding:4px 8px;flex:1;min-width:0;" />
+             <button class="btn btn-ghost btn-sm" data-salvar-materia="${mi}" title="Salvar">✓</button>
+             <button class="btn btn-ghost btn-sm" data-cancelar-edicao title="Cancelar">✕</button>
+           </div>`
+        : `<div style="font-size:15px;font-weight:700;font-family:var(--font-display);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+             <span>${escapeHtml(m.nome)}</span>
+             <button style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 4px;opacity:.7;" data-editar-materia="${mi}" title="Renomear disciplina">✏️</button>
+             <button style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 4px;opacity:.7;" data-deletar-materia="${mi}" title="Excluir disciplina">🗑️</button>
+           </div>`;
 
       return `
         <div class="card mb-12 bussola-disc" data-mi="${mi}">
@@ -901,17 +889,10 @@ function renderEditalDetalhe(view, idStr) {
                   <span>${discStats.coberto}/${discStats.total} tópicos cobertos${discStats.taxa != null ? ` · taxa média ${taxaDisc}` : ''}</span>
                   ${(() => {
                     const mc = _resolverMateriaCiclo(m);
-                    if (!mc) return `
-                      <button class="btn btn-sm" style="font-size:11px;padding:2px 8px;border:1px dashed var(--border);background:transparent;color:var(--text-muted);"
-                        data-vincular-mi="${mi}" title="O nome desta disciplina pode estar diferente do Ciclo — clique para vincular manualmente">
-                        🔗 Vincular ao ciclo
-                      </button>`;
+                    if (!mc) return `<button style="font-size:11px;padding:2px 8px;border:1px dashed var(--border);background:transparent;color:var(--text-muted);border-radius:4px;cursor:pointer;" data-vincular-mi="${mi}" title="Nome pode estar diferente do Ciclo — clique para vincular">🔗 Vincular ao ciclo</button>`;
                     const auto = !m.cicloMateriaId;
                     const tempo = _formatarMinutos(mc.minutosFeitos || 0);
-                    return `<button class="btn btn-sm" style="font-size:11px;padding:2px 8px;background:var(--surface-2,var(--surface));border:1px solid var(--border);color:var(--text-muted);"
-                      data-vincular-mi="${mi}" title="${auto ? 'Vínculo automático — clique para corrigir se o nome estiver errado' : 'Clique para alterar o vínculo com o ciclo'}">
-                      ⏱️ ${escapeHtml(mc.nome)} · ${tempo}${auto ? ' <small style="opacity:.6">(auto)</small>' : ' ✎'}
-                    </button>`;
+                    return `<button style="font-size:11px;padding:2px 8px;border:1px solid var(--border);background:transparent;color:var(--text-muted);border-radius:4px;cursor:pointer;" data-vincular-mi="${mi}" title="${auto ? 'Vínculo automático — clique para corrigir se estiver errado' : 'Clique para alterar vínculo'}">⏱️ ${escapeHtml(mc.nome)} · ${tempo}${auto ? ' (auto)' : ' ✎'}</button>`;
                   })()}
                 </div>
               </div>
@@ -937,21 +918,18 @@ function renderEditalDetalhe(view, idStr) {
                   ? (s.dias === 0 ? 'Hoje' : `${s.dias}d atrás`)
                   : '—';
                 const editandoTopico = _bussolaEditando && _bussolaEditando.tipo === 'topico' && _bussolaEditando.mi === mi && _bussolaEditando.ti === ti;
-
-                const nomeTopicoHtml = editandoTopico ? `
-                  <div style="display:flex;align-items:center;gap:6px;">
-                    <input type="text" class="input bussola-edit-input" data-input-nome-topico="${mi}:${ti}" value="${escapeHtml(t.nome)}"
-                      style="font-size:13px;padding:4px 8px;flex:1;min-width:0;" />
-                    <button class="btn btn-ghost btn-sm" data-salvar-topico="${mi}:${ti}" title="Salvar">✓</button>
-                    <button class="btn btn-ghost btn-sm" data-cancelar-edicao title="Cancelar">✕</button>
-                  </div>
-                ` : `
-                  <div style="font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                    <span>${escapeHtml(t.nome)}</span>
-                    <button class="bussola-icon-btn" data-editar-topico="${mi}:${ti}" title="Editar tópico" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;line-height:1;opacity:.75;">✏️</button>
-                    <button class="bussola-icon-btn" data-deletar-topico="${mi}:${ti}" title="Excluir tópico" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;line-height:1;opacity:.75;">🗑️</button>
-                  </div>
-                `;
+                const nomeTopicoHtml = editandoTopico
+                  ? `<div style="display:flex;align-items:center;gap:6px;">
+                       <input type="text" class="input bussola-edit-input" data-input-nome-topico="${mi}:${ti}" value="${escapeHtml(t.nome)}"
+                         style="font-size:13px;padding:4px 8px;flex:1;min-width:0;" />
+                       <button class="btn btn-ghost btn-sm" data-salvar-topico="${mi}:${ti}" title="Salvar">✓</button>
+                       <button class="btn btn-ghost btn-sm" data-cancelar-edicao title="Cancelar">✕</button>
+                     </div>`
+                  : `<div style="font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+                       <span>${escapeHtml(t.nome)}</span>
+                       <button style="background:none;border:none;cursor:pointer;font-size:11px;padding:1px 3px;opacity:.65;" data-editar-topico="${mi}:${ti}" title="Renomear tópico">✏️</button>
+                       <button style="background:none;border:none;cursor:pointer;font-size:11px;padding:1px 3px;opacity:.65;" data-deletar-topico="${mi}:${ti}" title="Excluir tópico">🗑️</button>
+                     </div>`;
 
                 return `
                   <div class="bussola-topico" style="border-left:3px solid ${cfg.cor};">
@@ -964,17 +942,14 @@ function renderEditalDetalhe(view, idStr) {
                       </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-                      ${s.status === 'nao_visto' || !s.tentativas ? `
-                        <button class="btn btn-sm" style="background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:11.5px;"
-                          data-toggle-status="${mi}:${ti}" title="Marcar como visto">
-                          ○ Marcar visto
-                        </button>
-                      ` : `
-                        <span class="badge bussola-status-badge" style="background:${cfg.cor}22;color:${cfg.cor};font-size:11.5px;cursor:pointer;"
-                          data-toggle-status="${mi}:${ti}" title="Clique para desmarcar como visto">
-                          ${cfg.icone} ${cfg.label}
-                        </span>
-                      `}
+                      ${s.status === 'nao_visto'
+                        ? `<button class="btn btn-sm" style="border:1px solid var(--border);background:transparent;color:var(--text-muted);font-size:11.5px;white-space:nowrap;"
+                             data-toggle-status="${mi}:${ti}" title="Marcar este tópico como visto">○ Marcar visto</button>`
+                        : `<span class="badge" style="background:${cfg.cor}22;color:${cfg.cor};font-size:11.5px;cursor:pointer;"
+                             data-toggle-status="${mi}:${ti}" title="Clique para desmarcar">
+                             ${cfg.icone} ${cfg.label}
+                           </span>`
+                      }
                       <button class="btn btn-sm" data-estudar-mi="${mi}" data-estudar-ti="${ti}"
                         title="Iniciar sessão de estudo no Ciclo para ${escapeHtml(t.nome)}">▶ Estudar</button>
                     </div>
@@ -1111,31 +1086,27 @@ function renderEditalDetalhe(view, idStr) {
       });
     });
 
-    // Editar nome da disciplina (entra em modo de edição inline)
+    // ── Editar nome da disciplina ──────────────────────────
     $$('[data-editar-materia]', lista).forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const mi = Number(btn.dataset.editarMateria);
-        _bussolaEditando = { tipo: 'materia', mi };
+        _bussolaEditando = { tipo: 'materia', mi: Number(btn.dataset.editarMateria) };
         desenharLista();
-        const input = $(`[data-input-nome-materia="${mi}"]`, lista);
-        input?.focus();
-        input?.select();
+        const inp = $(`[data-input-nome-materia="${btn.dataset.editarMateria}"]`, lista);
+        inp?.focus(); inp?.select();
       });
     });
 
-    // Excluir disciplina (e todos os seus tópicos)
+    // ── Excluir disciplina ─────────────────────────────────
     $$('[data-deletar-materia]', lista).forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const mi = Number(btn.dataset.deletarMateria);
         const m = edital.materias[mi];
-        if (!m) return;
-        const confirmar = confirm(`Excluir a disciplina "${m.nome}" e todos os seus ${((m.topicos || []).length)} tópicos?\n\nEsta ação não pode ser desfeita.`);
-        if (!confirmar) return;
+        if (!confirm(`Excluir a disciplina "${m.nome}" e todos os seus ${(m.topicos||[]).length} tópicos?\n\nEsta ação não pode ser desfeita.`)) return;
         edital.materias.splice(mi, 1);
         _bussolaExpandido.delete(mi);
-        if (_bussolaEditando && _bussolaEditando.mi === mi) _bussolaEditando = null;
+        if (_bussolaEditando?.mi === mi) _bussolaEditando = null;
         await db.editais.update(edital);
         await reloadState();
         showToast('Disciplina excluída.', 'success');
@@ -1143,30 +1114,28 @@ function renderEditalDetalhe(view, idStr) {
       });
     });
 
-    // Editar nome do tópico (entra em modo de edição inline)
+    // ── Editar nome do tópico ──────────────────────────────
     $$('[data-editar-topico]', lista).forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const [mi, ti] = btn.dataset.editarTopico.split(':').map(Number);
         _bussolaEditando = { tipo: 'topico', mi, ti };
         desenharLista();
-        const input = $(`[data-input-nome-topico="${mi}:${ti}"]`, lista);
-        input?.focus();
-        input?.select();
+        const inp = $(`[data-input-nome-topico="${mi}:${ti}"]`, lista);
+        inp?.focus(); inp?.select();
       });
     });
 
-    // Excluir tópico
+    // ── Excluir tópico ─────────────────────────────────────
     $$('[data-deletar-topico]', lista).forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const [mi, ti] = btn.dataset.deletarTopico.split(':').map(Number);
         const t = edital.materias[mi]?.topicos[ti];
         if (!t) return;
-        const confirmar = confirm(`Excluir o tópico "${t.nome}"?\n\nEsta ação não pode ser desfeita.`);
-        if (!confirmar) return;
+        if (!confirm(`Excluir o tópico "${t.nome}"?\n\nEsta ação não pode ser desfeita.`)) return;
         edital.materias[mi].topicos.splice(ti, 1);
-        if (_bussolaEditando && _bussolaEditando.tipo === 'topico' && _bussolaEditando.mi === mi && _bussolaEditando.ti === ti) _bussolaEditando = null;
+        if (_bussolaEditando?.tipo === 'topico' && _bussolaEditando.mi === mi && _bussolaEditando.ti === ti) _bussolaEditando = null;
         await db.editais.update(edital);
         await reloadState();
         showToast('Tópico excluído.', 'success');
@@ -1174,15 +1143,15 @@ function renderEditalDetalhe(view, idStr) {
       });
     });
 
-    // Salvar novo nome da disciplina
+    // ── Salvar nome da disciplina ──────────────────────────
     $$('[data-salvar-materia]', lista).forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const mi = Number(btn.dataset.salvarMateria);
-        const input = $(`[data-input-nome-materia="${mi}"]`, lista);
-        const novoNome = input?.value.trim();
-        if (!novoNome) { showToast('O nome não pode ficar em branco.', 'error'); return; }
-        edital.materias[mi].nome = novoNome;
+        const inp = $(`[data-input-nome-materia="${mi}"]`, lista);
+        const nome = inp?.value.trim();
+        if (!nome) { showToast('O nome não pode ficar em branco.', 'error'); return; }
+        edital.materias[mi].nome = nome;
         _bussolaEditando = null;
         await db.editais.update(edital);
         await reloadState();
@@ -1191,15 +1160,15 @@ function renderEditalDetalhe(view, idStr) {
       });
     });
 
-    // Salvar novo nome do tópico
+    // ── Salvar nome do tópico ──────────────────────────────
     $$('[data-salvar-topico]', lista).forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const [mi, ti] = btn.dataset.salvarTopico.split(':').map(Number);
-        const input = $(`[data-input-nome-topico="${mi}:${ti}"]`, lista);
-        const novoNome = input?.value.trim();
-        if (!novoNome) { showToast('O nome não pode ficar em branco.', 'error'); return; }
-        edital.materias[mi].topicos[ti].nome = novoNome;
+        const inp = $(`[data-input-nome-topico="${mi}:${ti}"]`, lista);
+        const nome = inp?.value.trim();
+        if (!nome) { showToast('O nome não pode ficar em branco.', 'error'); return; }
+        edital.materias[mi].topicos[ti].nome = nome;
         _bussolaEditando = null;
         await db.editais.update(edital);
         await reloadState();
@@ -1208,49 +1177,37 @@ function renderEditalDetalhe(view, idStr) {
       });
     });
 
-    // Cancelar edição inline (disciplina ou tópico)
+    // ── Cancelar edição (Enter/Esc/botão ✕) ───────────────
     $$('[data-cancelar-edicao]', lista).forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        _bussolaEditando = null;
-        desenharLista();
-      });
+      btn.addEventListener('click', (e) => { e.stopPropagation(); _bussolaEditando = null; desenharLista(); });
     });
-
-    // Atalhos de teclado nos campos de edição inline: Enter salva, Esc cancela
-    $$('.bussola-edit-input', lista).forEach(input => {
-      input.addEventListener('click', e => e.stopPropagation());
-      input.addEventListener('keydown', (e) => {
+    $$('.bussola-edit-input', lista).forEach(inp => {
+      inp.addEventListener('click', e => e.stopPropagation());
+      inp.addEventListener('keydown', e => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          const alvo = input.dataset.inputNomeMateria != null
-            ? $(`[data-salvar-materia="${input.dataset.inputNomeMateria}"]`, lista)
-            : $(`[data-salvar-topico="${input.dataset.inputNomeTopico}"]`, lista);
-          alvo?.click();
-        } else if (e.key === 'Escape') {
-          e.preventDefault();
-          _bussolaEditando = null;
-          desenharLista();
-        }
+          const key = inp.dataset.inputNomeMateria != null ? inp.dataset.inputNomeMateria : null;
+          const keyT = inp.dataset.inputNomeTopico != null ? inp.dataset.inputNomeTopico : null;
+          if (key != null) $(`[data-salvar-materia="${key}"]`, lista)?.click();
+          else if (keyT != null) $(`[data-salvar-topico="${keyT}"]`, lista)?.click();
+        } else if (e.key === 'Escape') { e.preventDefault(); _bussolaEditando = null; desenharLista(); }
       });
     });
 
-    // Badge/botão de status clicável — alterna entre Visto (dominado) e Não visto
-    $$('[data-toggle-status]', lista).forEach(badge => {
-      badge.addEventListener('click', async (e) => {
+    // ── Toggle Marcar visto / Desmarcar ───────────────────
+    $$('[data-toggle-status]', lista).forEach(el => {
+      el.addEventListener('click', async (e) => {
         e.stopPropagation();
-        const [mi, ti] = badge.dataset.toggleStatus.split(':').map(Number);
+        const [mi, ti] = el.dataset.toggleStatus.split(':').map(Number);
         const t = edital.materias[mi]?.topicos[ti];
         if (!t) return;
         const statusAtual = calcStatusEfetivoTopico(t, edital.materias[mi].nome).status;
         if (statusAtual === 'nao_visto') {
-          // Marcar como visto (dominado manual)
           t.statusManual = 'dominado';
           showToast('Tópico marcado como visto ⭐', 'success');
         } else {
-          // Desmarcar — remove override manual, volta ao cálculo automático
           delete t.statusManual;
-          showToast('Marcação removida — status voltará ao automático', '');
+          showToast('Marcação removida — voltará ao status automático', '');
         }
         await db.editais.update(edital);
         await reloadState();
