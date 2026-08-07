@@ -750,7 +750,8 @@ function renderEditalDetalhe(view, idStr) {
   view.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap;">
       <a href="#/editais" class="btn btn-ghost btn-sm">← Todos os editais</a>
-      <h2 style="margin:0;font-size:18px;font-family:var(--font-display);">${escapeHtml(edital.nome)}</h2>
+      <h2 style="margin:0;font-size:18px;font-family:var(--font-display);flex:1;">${escapeHtml(edital.nome)}</h2>
+      <button class="btn btn-ghost btn-sm" id="btn-excluir-edital" style="color:var(--danger);" title="Excluir este edital">🗑️ Excluir edital</button>
     </div>
 
     <!-- Resumo geral -->
@@ -795,6 +796,20 @@ function renderEditalDetalhe(view, idStr) {
     <!-- Lista de disciplinas -->
     <div id="bussola-lista"></div>
   `;
+
+  $('#btn-excluir-edital')?.addEventListener('click', async () => {
+    // Só apaga o "quadro" do edital em si (disciplinas/tópicos e vínculos
+    // com o ciclo) — as tentativas de questões já registradas continuam
+    // intactas em Estatísticas, mesmo depois de excluir o edital.
+    const confirmar = confirm(
+      `Excluir o edital "${edital.nome}"?\n\nIsso remove as disciplinas, tópicos e vínculos com o Ciclo de Estudos deste edital. Suas tentativas de questões já registradas NÃO são apagadas.\n\nEsta ação não pode ser desfeita.`
+    );
+    if (!confirmar) return;
+    await db.editais.remove(edital.id);
+    await reloadState();
+    showToast('Edital excluído.', 'success');
+    location.hash = '#/editais';
+  });
 
   function desenharLista() {
     const lista = $('#bussola-lista');
@@ -1141,122 +1156,4 @@ function renderKanbanCard(t, mi, ti, stats) {
       </div>
     </div>
   `;
-}
-
-/* ============================================================
-   TELA: LISTA DE EDITAIS
-   Exibe todos os editais do perfil ativo com progresso,
-   opção de abrir o detalhe, exportar JSON e deletar.
-   ============================================================ */
-
-function renderEditais(view) {
-  function desenhar() {
-    if (!state.editais.length) {
-      view.innerHTML = `
-        <div class="empty-state">
-          <p>Nenhum edital cadastrado ainda.</p>
-          <a href="#/editais/importar" class="btn btn-primary">Importar edital</a>
-        </div>
-      `;
-      return;
-    }
-
-    view.innerHTML = `
-      <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
-        <a href="#/editais/importar" class="btn btn-primary">+ Importar edital</a>
-      </div>
-      <div id="editais-lista"></div>
-    `;
-
-    const lista = $('#editais-lista');
-
-    lista.innerHTML = state.editais.map(edital => {
-      const p = calcProgressoEdital(edital);
-      const pct = Math.round(p.pct);
-      return `
-        <div class="card mb-12" style="cursor:default;">
-          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-            <div>
-              <div style="font-family:var(--font-display);font-size:16px;font-weight:700;">${escapeHtml(edital.nome)}</div>
-              ${edital.concurso ? `<div style="font-size:13px;color:var(--text-muted);margin-top:2px;">${escapeHtml(edital.concurso)}</div>` : ''}
-            </div>
-            <div style="display:flex;gap:8px;flex-shrink:0;">
-              <a href="#/editais/${edital.id}" class="btn btn-ghost btn-sm">Ver edital</a>
-              <button class="btn btn-ghost btn-sm" data-exportar-id="${edital.id}" title="Exportar como JSON">⬇️ Exportar</button>
-              <button class="btn btn-ghost btn-sm danger" data-deletar-id="${edital.id}" title="Deletar edital">🗑️</button>
-            </div>
-          </div>
-          <div class="stat-grid" style="margin-bottom:10px;">
-            <div class="stat-card"><div class="label">Disciplinas</div><div class="value">${(edital.materias || []).length}</div></div>
-            <div class="stat-card"><div class="label">Tópicos</div><div class="value">${p.total}</div></div>
-            <div class="stat-card success"><div class="label">Dominados</div><div class="value">${p.dominado}</div></div>
-            <div class="stat-card gold"><div class="label">% concluído</div><div class="value">${pct}%</div></div>
-          </div>
-          <div class="pct-bar-wrap">
-            <div class="pct-bar" style="flex:1;height:6px;border-radius:4px;">
-              <span style="width:${pct}%;background:var(--success);border-radius:4px;"></span>
-            </div>
-            <span class="num" style="font-size:12px;">${pct}%</span>
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    // Botão exportar JSON
-    $$('[data-exportar-id]', lista).forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = Number(btn.dataset.exportarId);
-        const edital = state.editais.find(e => e.id === id);
-        if (!edital) return;
-        const blob = new Blob([JSON.stringify(edital, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${edital.nome.replace(/[^a-z0-9]/gi, '_')}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-        showToast('Edital exportado com sucesso.', 'success');
-      });
-    });
-
-    // Botão deletar edital
-    $$('[data-deletar-id]', lista).forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = Number(btn.dataset.deletarId);
-        const edital = state.editais.find(e => e.id === id);
-        if (!edital) return;
-
-        openModal(`
-          <div style="padding:8px 0;">
-            <div style="font-family:var(--font-display);font-size:17px;font-weight:700;margin-bottom:10px;">Deletar edital</div>
-            <p style="margin:0 0 18px;color:var(--text-muted);font-size:14px;">
-              Tem certeza que deseja deletar o edital <strong>${escapeHtml(edital.nome)}</strong>?
-              Esta ação não pode ser desfeita. Suas tentativas registradas <strong>não</strong> serão afetadas.
-            </p>
-            <div style="display:flex;gap:8px;justify-content:flex-end;">
-              <button class="btn btn-ghost" id="btn-confirma-cancelar">Cancelar</button>
-              <button class="btn danger" id="btn-confirma-deletar">Sim, deletar</button>
-            </div>
-          </div>
-        `);
-
-        $('#btn-confirma-cancelar')?.addEventListener('click', closeModal);
-
-        $('#btn-confirma-deletar')?.addEventListener('click', async () => {
-          try {
-            await db.editais.delete(id);
-            await reloadState();
-            closeModal();
-            showToast('Edital deletado.', 'success');
-            desenhar();
-          } catch (err) {
-            showToast('Erro ao deletar edital.', 'danger');
-            console.error(err);
-          }
-        });
-      });
-    });
-  }
-
-  desenhar();
 }
