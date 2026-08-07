@@ -166,6 +166,14 @@ window.renderMentorIA = renderMentorIA;
 function _renderShell(view, dados) {
   const analise = dados?.analise||null;
   const profile = dados?.profile||null;
+  const filtros = getMentorFiltros();
+  const concursos = listarConcursosMentor();
+
+  const filtroAtivo = filtros.dataInicio || filtros.concurso;
+  const filtroLabel = [
+    filtros.concurso   ? `Concurso: ${filtros.concurso}` : '',
+    filtros.dataInicio ? `A partir de: ${toBRDate(filtros.dataInicio)}` : ''
+  ].filter(Boolean).join(' · ');
 
   view.innerHTML = `
     <div class="toolbar" style="flex-wrap:wrap;gap:10px;align-items:center;">
@@ -177,17 +185,62 @@ function _renderShell(view, dados) {
       <button class="btn btn-primary" id="btn-mentor-atualizar">🤖 Atualizar análise</button>
     </div>
 
+    <!-- Painel de filtros -->
+    <div class="card mb-12" style="padding:12px 14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+        <div style="font-weight:700;font-size:13.5px;">🎯 Filtros da análise</div>
+        ${filtroAtivo ? `<button class="btn btn-sm btn-ghost" id="btn-mentor-limpar-filtros">Limpar filtros</button>` : ''}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div>
+          <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">Concurso</label>
+          <select id="mentor-filtro-concurso" style="width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;">
+            <option value="">Todos os concursos</option>
+            ${concursos.map(c => `<option value="${escapeHtml(c)}" ${filtros.concurso===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">Analisar a partir de</label>
+          <input type="date" id="mentor-filtro-data" value="${filtros.dataInicio||''}"
+            style="width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;box-sizing:border-box;">
+        </div>
+      </div>
+      ${filtroAtivo ? `<div style="font-size:12px;color:var(--gold);margin-top:8px;">⚡ Filtro ativo: ${escapeHtml(filtroLabel)}</div>` : `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;">Sem filtro — analisando todos os dados históricos.</div>`}
+    </div>
+
     ${!analise ? `
       <div class="card" style="text-align:center;padding:48px 24px;">
         <div style="font-size:40px;margin-bottom:14px;">🎯</div>
         <div style="font-size:17px;font-weight:700;margin-bottom:8px;">Mentor Trilha</div>
         <div class="text-muted" style="font-size:13.5px;max-width:420px;margin:0 auto 24px;">
-          Clique em "Atualizar análise" — o Mentor lê todo o seu histórico e monta um plano personalizado para hoje.
+          Defina os filtros acima e clique em "Atualizar análise" para o Mentor analisar só os dados do TCDF (ou do período que você escolher).
         </div>
       </div>` : ''}
 
     ${analise && profile ? _renderFull(analise, profile) : ''}
   `;
+
+  // Filtros: aplicar ao mudar
+  const aplicarFiltros = () => {
+    const novosFiltros = {
+      concurso:   $('#mentor-filtro-concurso').value || null,
+      dataInicio: $('#mentor-filtro-data').value     || null
+    };
+    setMentorFiltros(novosFiltros);
+    _invalidarCacheMentor();
+    _renderShell(view, null); // limpa análise ao mudar filtro
+    showToast('Filtros aplicados — clique em "Atualizar análise" para gerar com os novos dados.', '');
+  };
+
+  $('#mentor-filtro-concurso')?.addEventListener('change', aplicarFiltros);
+  $('#mentor-filtro-data')?.addEventListener('change', aplicarFiltros);
+
+  $('#btn-mentor-limpar-filtros')?.addEventListener('click', () => {
+    setMentorFiltros({ dataInicio: null, concurso: null });
+    _invalidarCacheMentor();
+    _renderShell(view, null);
+    showToast('Filtros removidos.', '');
+  });
 
   $('#btn-mentor-atualizar')?.addEventListener('click', async () => {
     const btn = $('#btn-mentor-atualizar');
@@ -501,12 +554,15 @@ async function renderCardMentorDashboard() {
   const acrit= (analise.alertas||[]).filter(a=>a.nivel==='critico').slice(0,2);
   const aaten= (analise.alertas||[]).filter(a=>a.nivel==='atencao').slice(0,1);
   const conq = (profile.conquistas||[]).slice(-1)[0];
+  const filt = profile.filtrosAplicados||{};
+  const filtLabel = [filt.concurso, filt.dataInicio?`desde ${toBRDate(filt.dataInicio)}`:''].filter(Boolean).join(' · ');
 
   card.innerHTML=`
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${filtLabel?'4px':'10px'};">
       <div class="card-title" style="margin:0;">🧠 Mentor Trilha</div>
       <a href="#/mentor" class="btn btn-sm">Análise completa</a>
     </div>
+    ${filtLabel?`<div style="font-size:11.5px;color:var(--gold);margin-bottom:8px;">⚡ ${escapeHtml(filtLabel)}</div>`:''}
     <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:10px;">
       <div style="text-align:center;flex-shrink:0;">
         <div style="font-size:32px;font-weight:900;line-height:1;color:${_iCor(ind.indiceAprovacao)};">${ind.indiceAprovacao??'—'}</div>

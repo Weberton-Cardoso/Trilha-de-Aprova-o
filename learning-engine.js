@@ -570,9 +570,61 @@ window.lerDiarioMentor = _lerDiario;
    13. buildLearningProfile() — PONTO DE ENTRADA PRINCIPAL
    ============================================================ */
 
+/* ============================================================
+   FILTROS DO MENTOR — persistidos no localStorage
+   ============================================================ */
+
+const _MENTOR_FILTRO_KEY = 'mentor_filtros_v1';
+
+function getMentorFiltros() {
+  try {
+    return JSON.parse(localStorage.getItem(_MENTOR_FILTRO_KEY) || 'null') || {
+      dataInicio: null,  // ISO date string ou null (sem filtro)
+      concurso:   null   // string exata ou null (sem filtro)
+    };
+  } catch { return { dataInicio: null, concurso: null }; }
+}
+
+function setMentorFiltros(filtros) {
+  try { localStorage.setItem(_MENTOR_FILTRO_KEY, JSON.stringify(filtros)); } catch {}
+}
+window.getMentorFiltros = getMentorFiltros;
+window.setMentorFiltros = setMentorFiltros;
+
+/** Lista os concursos distintos presentes nas tentativas (para o select de filtro). */
+function listarConcursosMentor() {
+  const concursos = new Set(
+    (state.tentativas || []).map(t => (t.concurso || '').trim()).filter(Boolean)
+  );
+  return [...concursos].sort();
+}
+window.listarConcursosMentor = listarConcursosMentor;
+
 function buildLearningProfile() {
-  const { tentativas, ciclos, cicloMaterias, cicloSessoes, simulados,
+  const { tentativas: tentativasAll, ciclos, cicloMaterias, cicloSessoes: sessoesAll, simulados,
           resumos, revisoes, errosQuestoes, diagnosticosErro, editais, perfis } = state;
+
+  // --- APLICAR FILTROS ---
+  const filtros = getMentorFiltros();
+  const norm = s => (s || '').trim().toLowerCase();
+
+  const tentativas = tentativasAll.filter(t => {
+    if (filtros.dataInicio && t.data && t.data < filtros.dataInicio) return false;
+    if (filtros.concurso  && norm(t.concurso) !== norm(filtros.concurso)) return false;
+    return true;
+  });
+
+  // Sessões do ciclo: filtra só por data (não têm campo concurso)
+  const cicloSessoes = sessoesAll.filter(s => {
+    if (filtros.dataInicio && s.data && s.data < filtros.dataInicio) return false;
+    return true;
+  });
+
+  const simuladosFilt = simulados.filter(s => {
+    if (filtros.dataInicio && s.data && s.data < filtros.dataInicio) return false;
+    if (filtros.concurso && norm(s.concurso) !== norm(filtros.concurso)) return false;
+    return true;
+  });
 
   const perfilAtivo = perfis.find(p=>p.id===db.perfilAtivoId)||perfis[0]||{};
   const perfilEst   = {
@@ -598,10 +650,10 @@ function buildLearningProfile() {
       ? Math.round(topicosEdital.filter(t=>t.concluido).length/topicosEdital.length*100) : null
   };
 
-  const simOrdenados = [...simulados].sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+  const simOrdenados = [...simuladosFilt].sort((a,b)=>(a.data||'').localeCompare(b.data||''));
   const ultimoSim    = simOrdenados[simOrdenados.length-1]||null;
   const simCalc = {
-    total: simulados.length,
+    total: simuladosFilt.length,
     ultimaTaxa: ultimoSim?.taxa??null, ultimaData: ultimoSim?.data??null,
     tendencia: simOrdenados.length>=2?(simOrdenados[simOrdenados.length-1].taxa||0)-(simOrdenados[simOrdenados.length-2].taxa||0):null
   };
@@ -653,6 +705,7 @@ function buildLearningProfile() {
   return {
     perfilNome:   perfilAtivo.nome||'Histórico Geral',
     hoje:         _LIE.hoje(),
+    filtrosAplicados: filtros,
     perfilEstrategico: perfilEst,
     questoes, tempo, ciclo,
     revisoes: { revistasHoje:revisoes.filter(r=>r.data===_LIE.hoje()).length, semRevisar7:ciclo.semRevisar7||[] },
