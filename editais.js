@@ -642,74 +642,8 @@ function initDashboardEditalChart() {
 }
 
 /* ============================================================
-   TELA: DETALHE DO EDITAL — QUADRO KANBAN
+   TELA: DETALHE DO EDITAL — BÚSSOLA EDITÁVEL
    ============================================================ */
-
-/* ============================================================
-   BÚSSOLA DO EDITAL — visão verticalizada com status automático
-   Status calculado a partir de tentativas reais + ciclo de estudos.
-   Substitui o antigo Kanban manual.
-   ============================================================ */
-
-/** Calcula o status automático de um tópico com base nos dados reais.
- *  Hierarquia: Dominado > Bom > Revisar > Crítico > Não visto.
- *  Critérios:
- *   - Não visto: sem nenhuma tentativa por assunto
- *   - Crítico: taxa < 50% OU > 30 dias sem tentativa
- *   - Revisar: taxa 50–69% OU > 15 dias sem tentativa
- *   - Bom: taxa 70–84% E ≤ 15 dias
- *   - Dominado: taxa ≥ 85% E ≤ 30 dias
- *  "Coberto" (conta no % do edital): pelo menos 1 tentativa E taxa ≥ 50%.
- */
-function calcStatusAutomaticoTopico(nomeTopico, nomeDisciplina) {
-  const hoje = new Date().toISOString().slice(0, 10);
-
-  // 1) Tentativas por assunto (match exato normalizado)
-  const porAssunto = state.tentativas.filter(t => _norm(t.assunto) === _norm(nomeTopico));
-
-  // 2) Tentativas por disciplina (fallback quando não há por assunto)
-  const porDisciplina = nomeDisciplina
-    ? state.tentativas.filter(t => _norm(t.disciplina) === _norm(nomeDisciplina))
-    : [];
-
-  const lista = porAssunto.length ? porAssunto : [];
-
-  if (!lista.length) {
-    // Sem nenhuma tentativa vinculada ao tópico
-    return { status: 'nao_visto', taxa: null, dias: null, tentativas: 0, questoes: 0, coberto: false };
-  }
-
-  const resumo = calcResumo(lista);
-  const ordenada = [...lista].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
-  const ultimaData = ordenada[0]?.data;
-  const dias = ultimaData
-    ? Math.round((new Date(hoje) - new Date(ultimaData + 'T12:00:00')) / 86400000)
-    : 999;
-
-  const taxa = resumo.taxa;
-  const coberto = taxa >= 50;
-
-  let status;
-  if (taxa >= 85 && dias <= 30)       status = 'dominado';
-  else if (taxa >= 70 && dias <= 15)  status = 'bom';
-  else if (taxa < 50 || dias > 30)    status = 'critico';
-  else                                 status = 'revisar';
-
-  return { status, taxa, dias, tentativas: resumo.tentativas, questoes: resumo.total, coberto };
-}
-
-/** Calcula o status automático de toda uma disciplina (agregado de tópicos). */
-function calcStatusDisciplina(materia) {
-  const topicosComDados = (materia.topicos || []).map(t =>
-    calcStatusAutomaticoTopico(t.nome, materia.nome)
-  );
-  const comTentativa = topicosComDados.filter(s => s.tentativas > 0);
-  if (!comTentativa.length) return { taxa: null, coberto: 0, total: topicosComDados.length };
-
-  const taxaMedia = comTentativa.reduce((s, x) => s + x.taxa, 0) / comTentativa.length;
-  const coberto   = topicosComDados.filter(s => s.coberto).length;
-  return { taxa: taxaMedia, coberto, total: topicosComDados.length };
-}
 
 const _STATUS_BUSSOLA = {
   dominado:  { label: 'Dominado',   cor: 'var(--success)', icone: '⭐', ordem: 4 },
@@ -722,6 +656,7 @@ const _STATUS_BUSSOLA = {
 let _bussolaEditalId  = null;
 let _bussolaFiltro    = 'todos';   // 'todos' | 'critico' | 'revisar' | 'nao_visto'
 let _bussolaExpandido = new Set(); // ids de disciplinas expandidas
+let _bussolaEditando  = null;      // { mi, ti, tipo } para edição inline
 
 function renderEditalDetalhe(view, idStr) {
   const id = Number(idStr);
@@ -729,6 +664,7 @@ function renderEditalDetalhe(view, idStr) {
     _bussolaFiltro    = 'todos';
     _bussolaExpandido = new Set();
     _bussolaEditalId  = id;
+    _bussolaEditando  = null;
   }
 
   const edital = state.editais.find(e => e.id === id);
@@ -793,14 +729,16 @@ function renderEditalDetalhe(view, idStr) {
       <button class="chip ${_bussolaFiltro === 'nao_visto' ? 'active' : ''}" data-filtro-bussola="nao_visto">○ Não vistos</button>
     </div>
 
+    <!-- Botão adicionar disciplina -->
+    <div style="margin-bottom:16px;">
+      <button class="btn btn-primary" id="btn-add-disciplina-edital">+ Adicionar disciplina</button>
+    </div>
+
     <!-- Lista de disciplinas -->
     <div id="bussola-lista"></div>
   `;
 
   $('#btn-excluir-edital')?.addEventListener('click', async () => {
-    // Só apaga o "quadro" do edital em si (disciplinas/tópicos e vínculos
-    // com o ciclo) — as tentativas de questões já registradas continuam
-    // intactas em Estatísticas, mesmo depois de excluir o edital.
     const confirmar = confirm(
       `Excluir o edital "${edital.nome}"?\n\nIsso remove as disciplinas, tópicos e vínculos com o Ciclo de Estudos deste edital. Suas tentativas de questões já registradas NÃO são apagadas.\n\nEsta ação não pode ser desfeita.`
     );
@@ -809,6 +747,19 @@ function renderEditalDetalhe(view, idStr) {
     await reloadState();
     showToast('Edital excluído.', 'success');
     location.hash = '#/editais';
+  });
+
+  // Adicionar nova disciplina ao edital
+  $('#btn-add-disciplina-edital')?.addEventListener('click', async () => {
+    const nome = prompt('Nome da nova disciplina:');
+    if (!nome || !nome.trim()) return;
+    edital.materias = edital.materias || [];
+    edital.materias.push({ nome: nome.trim(), topicos: [] });
+    await db.editais.update(edital);
+    await reloadState();
+    _bussolaExpandido.add(edital.materias.length - 1);
+    showToast('Disciplina adicionada!', 'success');
+    desenharLista();
   });
 
   function desenharLista() {
@@ -820,6 +771,7 @@ function renderEditalDetalhe(view, idStr) {
       const taxaDisc  = discStats.taxa != null ? fmtPct(discStats.taxa) : '—';
       const cobPct    = discStats.total ? Math.round((discStats.coberto / discStats.total) * 100) : 0;
       const expandido = _bussolaExpandido.has(mi);
+      const editandoDisc = _bussolaEditando && _bussolaEditando.mi === mi && _bussolaEditando.tipo === 'disciplina';
 
       // Filtra tópicos
       const topicosFiltrados = (m.topicos || []).map((t, ti) => ({
@@ -828,19 +780,30 @@ function renderEditalDetalhe(view, idStr) {
         _bussolaFiltro === 'todos' || s.status === _bussolaFiltro
       );
 
-      // Se filtro ativo e nenhum tópico da disciplina passa → oculta a disciplina
       if (_bussolaFiltro !== 'todos' && !topicosFiltrados.length) return '';
 
       return `
         <div class="card mb-12 bussola-disc" data-mi="${mi}">
-          <!-- Cabeçalho da disciplina (clicável pra expandir) -->
+          <!-- Cabeçalho da disciplina -->
           <div class="bussola-disc-header" data-toggle-disc="${mi}" style="cursor:pointer;">
             <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
               <svg class="bussola-chev ${expandido ? 'open' : ''}" viewBox="0 0 24 24" width="16" height="16">
                 <path fill="currentColor" d="M7 10l5 5 5-5z"/>
               </svg>
               <div style="flex:1;min-width:0;">
-                <div style="font-size:15px;font-weight:700;font-family:var(--font-display);">${escapeHtml(m.nome)}</div>
+                ${editandoDisc ? `
+                  <div style="display:flex;gap:6px;align-items:center;" onclick="event.stopPropagation();">
+                    <input type="text" id="edit-disc-${mi}" value="${escapeHtml(m.nome)}" style="font-weight:700;font-family:var(--font-display);font-size:15px;flex:1;padding:4px 8px;border-radius:6px;border:1px solid var(--gold);background:var(--surface);" onclick="event.stopPropagation();">
+                    <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();salvarNomeDisciplina(${mi})" style="padding:4px 10px;">✓</button>
+                    <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();cancelarEdicao()" style="padding:4px 10px;">✕</button>
+                  </div>
+                ` : `
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <span style="font-size:15px;font-weight:700;font-family:var(--font-display);">${escapeHtml(m.nome)}</span>
+                    <span class="icon-btn" onclick="event.stopPropagation();iniciarEdicaoDisciplina(${mi})" title="Editar nome" style="font-size:13px;opacity:.6;">✏️</span>
+                    <span class="icon-btn" onclick="event.stopPropagation();excluirDisciplina(${mi})" title="Excluir disciplina" style="font-size:13px;opacity:.6;color:var(--danger);">🗑️</span>
+                  </div>
+                `}
                 <div style="font-size:12px;color:var(--text-muted);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                   <span>${discStats.coberto}/${discStats.total} tópicos cobertos${discStats.taxa != null ? ` · taxa média ${taxaDisc}` : ''}</span>
                   ${(() => {
@@ -855,7 +818,6 @@ function renderEditalDetalhe(view, idStr) {
                 </div>
               </div>
             </div>
-            <!-- Mini barra de progresso da disciplina -->
             <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
               <div class="pct-bar-wrap" style="width:80px;margin:0;">
                 <div class="pct-bar" style="width:80px;height:5px;border-radius:3px;">
@@ -866,7 +828,7 @@ function renderEditalDetalhe(view, idStr) {
             </div>
           </div>
 
-          <!-- Tópicos (visíveis só se expandido) -->
+          <!-- Tópicos -->
           ${expandido ? `
             <div class="bussola-topicos" style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">
               ${topicosFiltrados.length ? topicosFiltrados.map(({ t, ti, s }) => {
@@ -875,18 +837,32 @@ function renderEditalDetalhe(view, idStr) {
                 const diasTxt = s.dias != null
                   ? (s.dias === 0 ? 'Hoje' : `${s.dias}d atrás`)
                   : '—';
+                const editandoTopico = _bussolaEditando && _bussolaEditando.mi === mi && _bussolaEditando.ti === ti && _bussolaEditando.tipo === 'topico';
+
                 return `
-                  <div class="bussola-topico" style="border-left:3px solid ${cfg.cor};">
+                  <div class="bussola-topico" style="border-left:3px solid ${cfg.cor};padding-left:12px;margin-bottom:10px;">
                     <div style="flex:1;min-width:0;">
-                      <div style="font-size:13.5px;font-weight:600;">${escapeHtml(t.nome)}</div>
+                      ${editandoTopico ? `
+                        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+                          <input type="text" id="edit-top-${mi}-${ti}" value="${escapeHtml(t.nome)}" style="flex:1;padding:4px 8px;border-radius:6px;border:1px solid var(--gold);background:var(--surface);font-size:13.5px;">
+                          <button class="btn btn-sm btn-primary" onclick="salvarNomeTopico(${mi},${ti})" style="padding:4px 10px;">✓</button>
+                          <button class="btn btn-sm btn-ghost" onclick="cancelarEdicao()" style="padding:4px 10px;">✕</button>
+                        </div>
+                      ` : `
+                        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                          <span style="font-size:13.5px;font-weight:600;">${escapeHtml(t.nome)}</span>
+                          <span class="icon-btn" onclick="iniciarEdicaoTopico(${mi},${ti})" title="Editar nome" style="font-size:12px;opacity:.6;">✏️</span>
+                          <span class="icon-btn" onclick="excluirTopico(${mi},${ti})" title="Excluir tópico" style="font-size:12px;opacity:.6;color:var(--danger);">🗑️</span>
+                        </div>
+                      `}
                       <div style="font-size:12px;color:var(--text-muted);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap;">
                         ${s.tentativas ? `<span>${s.tentativas} tent. · ${s.questoes} q.</span>` : ''}
                         ${s.taxa != null ? `<span>Taxa: <b style="color:${cfg.cor}">${taxaTxt}</b></span>` : ''}
                         ${s.dias != null ? `<span>Último: ${diasTxt}</span>` : ''}
                       </div>
                     </div>
-                    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-                      <span class="badge" style="background:${cfg.cor}22;color:${cfg.cor};font-size:11.5px;">
+                    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap;">
+                      <span class="badge" style="background:${cfg.cor}22;color:${cfg.cor};font-size:11.5px;cursor:pointer;" onclick="toggleStatusTopico(${mi},${ti})" title="Clique para marcar como dominado/não visto">
                         ${cfg.icone} ${cfg.label}
                       </span>
                       <button class="btn btn-sm" data-estudar-mi="${mi}" data-estudar-ti="${ti}"
@@ -895,7 +871,6 @@ function renderEditalDetalhe(view, idStr) {
                   </div>`;
               }).join('') : `<p class="text-muted" style="font-size:13px;padding:8px 0;">Nenhum tópico com este filtro.</p>`}
 
-              <!-- Botão pra adicionar tópico novo -->
               <button class="btn btn-ghost btn-sm" style="margin-top:10px;width:100%;" data-add-topico="${mi}">
                 + Adicionar tópico
               </button>
@@ -904,7 +879,7 @@ function renderEditalDetalhe(view, idStr) {
         </div>`;
     }).join('');
 
-    // Listeners dos chips de filtro
+    // Filtros
     $$('[data-filtro-bussola]').forEach(btn => {
       btn.addEventListener('click', () => {
         _bussolaFiltro = btn.dataset.filtroBussola;
@@ -913,7 +888,7 @@ function renderEditalDetalhe(view, idStr) {
       });
     });
 
-    // Toggle expansão de disciplina
+    // Toggle expansão
     $$('[data-toggle-disc]', lista).forEach(el => {
       el.addEventListener('click', () => {
         const mi = Number(el.dataset.toggleDisc);
@@ -923,7 +898,7 @@ function renderEditalDetalhe(view, idStr) {
       });
     });
 
-    // Vincular / alterar vínculo com matéria do ciclo
+    // Vincular ciclo
     $$('[data-vincular-mi]', lista).forEach(el => {
       el.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -936,14 +911,11 @@ function renderEditalDetalhe(view, idStr) {
           return;
         }
 
-        // Abre modal de seleção com score de similaridade
         const candidatos = cicloMaterias
           .map(m => ({ m, score: _calcScoreSimilaridade(matEdital.nome, m.nome) }))
           .sort((a, b) => b.score - a.score);
 
-        const cicloNomeMap = new Map(
-          state.ciclos.map(c => [c.id, c.nome])
-        );
+        const cicloNomeMap = new Map(state.ciclos.map(c => [c.id, c.nome]));
 
         const opcoesHtml = candidatos.map(({ m, score }) => {
           const cicloNome = cicloNomeMap.get(m.cicloId) || '';
@@ -967,7 +939,6 @@ function renderEditalDetalhe(view, idStr) {
           <h2>🔗 Vincular "${escapeHtml(matEdital.nome)}" ao Ciclo</h2>
           <p class="text-muted" style="font-size:13px;margin-top:0;">
             Selecione qual matéria do seu Ciclo de Estudos corresponde a esta disciplina do edital.
-            O vínculo permite exibir o tempo estudado e sincronizar o progresso.
           </p>
           <div style="max-height:320px;overflow-y:auto;padding-right:4px;">
             ${opcoesHtml}
@@ -996,7 +967,7 @@ function renderEditalDetalhe(view, idStr) {
       });
     });
 
-    // Botão Estudar → navega pro Ciclo com a disciplina pré-selecionada
+    // Estudar
     $$('[data-estudar-mi]', lista).forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -1006,12 +977,11 @@ function renderEditalDetalhe(view, idStr) {
         const topico     = edital.materias[mi]?.topicos[ti]?.nome || '';
         showToast(`Abrindo Ciclo de Estudos para: ${disciplina}`, 'success');
         location.hash = '#/ciclo';
-        // Passa disciplina+tópico via sessionStorage pra ciclo.js pegar na inicialização
         try { sessionStorage.setItem('ta_ciclo_sugestao', JSON.stringify({ disciplina, topico })); } catch (_) {}
       });
     });
 
-    // Adicionar tópico novo
+    // Adicionar tópico
     $$('[data-add-topico]', lista).forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -1026,9 +996,86 @@ function renderEditalDetalhe(view, idStr) {
     });
   }
 
+  // ===== FUNÇÕES DE EDIÇÃO (globais para onclick inline) =====
+  window.iniciarEdicaoDisciplina = function(mi) {
+    _bussolaEditando = { mi, tipo: 'disciplina' };
+    desenharLista();
+    setTimeout(() => { document.getElementById(`edit-disc-${mi}`)?.focus(); }, 10);
+  };
+
+  window.salvarNomeDisciplina = async function(mi) {
+    const input = document.getElementById(`edit-disc-${mi}`);
+    if (!input) return;
+    const novoNome = input.value.trim();
+    if (!novoNome) { showToast('O nome não pode ficar vazio.', 'danger'); return; }
+    edital.materias[mi].nome = novoNome;
+    await db.editais.update(edital);
+    await reloadState();
+    _bussolaEditando = null;
+    showToast('Disciplina renomeada!', 'success');
+    desenharLista();
+  };
+
+  window.excluirDisciplina = async function(mi) {
+    const nome = edital.materias[mi]?.nome;
+    if (!confirm(`Excluir a disciplina "${nome}"?\n\nTodos os ${edital.materias[mi].topicos?.length || 0} tópicos dela serão removidos. Esta ação não pode ser desfeita.`)) return;
+    edital.materias.splice(mi, 1);
+    await db.editais.update(edital);
+    await reloadState();
+    _bussolaExpandido.delete(mi);
+    showToast('Disciplina excluída.', 'success');
+    desenharLista();
+  };
+
+  window.iniciarEdicaoTopico = function(mi, ti) {
+    _bussolaEditando = { mi, ti, tipo: 'topico' };
+    desenharLista();
+    setTimeout(() => { document.getElementById(`edit-top-${mi}-${ti}`)?.focus(); }, 10);
+  };
+
+  window.salvarNomeTopico = async function(mi, ti) {
+    const input = document.getElementById(`edit-top-${mi}-${ti}`);
+    if (!input) return;
+    const novoNome = input.value.trim();
+    if (!novoNome) { showToast('O nome não pode ficar vazio.', 'danger'); return; }
+    edital.materias[mi].topicos[ti].nome = novoNome;
+    await db.editais.update(edital);
+    await reloadState();
+    _bussolaEditando = null;
+    showToast('Tópico renomeado!', 'success');
+    desenharLista();
+  };
+
+  window.excluirTopico = async function(mi, ti) {
+    const nome = edital.materias[mi]?.topicos[ti]?.nome;
+    if (!confirm(`Excluir o tópico "${nome}"?\n\nEsta ação não pode ser desfeita.`)) return;
+    edital.materias[mi].topicos.splice(ti, 1);
+    await db.editais.update(edital);
+    await reloadState();
+    showToast('Tópico excluído.', 'success');
+    desenharLista();
+  };
+
+  window.toggleStatusTopico = async function(mi, ti) {
+    const topico = edital.materias[mi].topicos[ti];
+    const statusAtual = topico.statusManual || 'nao_visto';
+    const novoStatus = statusAtual === 'dominado' ? 'nao_visto' : 'dominado';
+    topico.statusManual = novoStatus;
+    topico.status = novoStatus;
+    await db.editais.update(edital);
+    await reloadState();
+    showToast(novoStatus === 'dominado' ? 'Marcado como dominado! ⭐' : 'Marcado como não visto.', 'success');
+    desenharLista();
+  };
+
+  window.cancelarEdicao = function() {
+    _bussolaEditando = null;
+    desenharLista();
+  };
+
   desenharLista();
 
-  // Expande automaticamente disciplinas com tópicos críticos (primeira abertura)
+  // Expande automaticamente disciplinas com tópicos críticos
   if (_bussolaExpandido.size === 0) {
     (edital.materias || []).forEach((m, mi) => {
       const temCritico = (m.topicos || []).some(t =>
@@ -1039,70 +1086,6 @@ function renderEditalDetalhe(view, idStr) {
     if (_bussolaExpandido.size > 0) desenharLista();
   }
 }
-
-/* ============================================================
-   MATCHING EDITAL ↔ CICLO
-   Tenta vincular automaticamente uma disciplina do edital a uma
-   matéria do ciclo de estudos usando quatro estratégias em cascata:
-   1. Vínculo manual já salvo no edital (cicloMateriaId)
-   2. Nome normalizado idêntico
-   3. Um nome contém o outro (e.g. "AFO" dentro de "Administração
-      Financeira e Orçamentária")
-   4. Sigla: iniciais das palavras principais (≥4 letras) formam a sigla
-   5. Maior interseção de palavras-chave (≥ 50% de coincidência)
-   ============================================================ */
-
-function _extrairSigla(nome) {
-  return _norm(nome)
-    .split(/\s+/)
-    .filter(w => w.length >= 4 && !/^(de|da|do|das|dos|e|em|por|para|com|sem|que|uma|uns|umas|os|as|no|na|nos|nas|ao|aos|pelo|pela|pelos|pelas)$/.test(w))
-    .map(w => w[0])
-    .join('');
-}
-
-function _calcScoreSimilaridade(a, b) {
-  const na = _norm(a), nb = _norm(b);
-  if (na === nb) return 1;
-  if (na.includes(nb) || nb.includes(na)) return 0.9;
-
-  // Sigla: verifica se um é a sigla do outro
-  const siglaA = _extrairSigla(a), siglaB = _extrairSigla(b);
-  if (siglaA === nb || siglaB === na || siglaA === siglaB) return 0.85;
-
-  // Palavras-chave em comum (≥ 4 letras, sem stopwords)
-  const stopwords = new Set(['de','da','do','das','dos','e','em','por','para','com','sem','ao','no','na']);
-  const palavrasA = na.split(/\s+/).filter(w => w.length >= 4 && !stopwords.has(w));
-  const palavrasB = nb.split(/\s+/).filter(w => w.length >= 4 && !stopwords.has(w));
-  if (!palavrasA.length || !palavrasB.length) return 0;
-  const comuns = palavrasA.filter(w => palavrasB.includes(w)).length;
-  return comuns / Math.max(palavrasA.length, palavrasB.length);
-}
-
-/**
- * Dado uma matéria do edital, retorna a matéria do ciclo mais provável.
- * Usa vínculo manual salvo (cicloMateriaId) ou matching automático por score.
- * Retorna null se não encontrar nada com score >= 0.5.
- */
-function _resolverMateriaCiclo(materiaEdital) {
-  if (!materiaEdital) return null;
-  const cicloMaterias = state.cicloMaterias || [];
-  if (!cicloMaterias.length) return null;
-
-  // 1. Vínculo manual salvo
-  if (materiaEdital.cicloMateriaId) {
-    const vinculada = cicloMaterias.find(m => m.id === materiaEdital.cicloMateriaId);
-    if (vinculada) return vinculada;
-  }
-
-  // 2. Matching automático por score
-  let melhor = null, melhorScore = 0;
-  for (const m of cicloMaterias) {
-    const score = _calcScoreSimilaridade(materiaEdital.nome, m.nome);
-    if (score > melhorScore) { melhorScore = score; melhor = m; }
-  }
-  return melhorScore >= 0.5 ? melhor : null;
-}
-
 function renderKanbanCard(t, mi, ti, stats) {
   const marcado = t.status === 'dominado';
   const pct = stats ? stats.taxa : 0;
