@@ -698,10 +698,27 @@ function calcStatusAutomaticoTopico(nomeTopico, nomeDisciplina) {
   return { status, taxa, dias, tentativas: resumo.tentativas, questoes: resumo.total, coberto };
 }
 
+/** Status "efetivo" de um tópico na Bússola: se o usuário marcou manualmente
+ *  (via clique no badge), essa marcação prevalece sobre o cálculo automático
+ *  baseado em tentativas. Caso contrário, cai no cálculo automático normal. */
+function calcStatusEfetivoTopico(t, nomeDisciplina) {
+  if (t.statusManual) {
+    return {
+      status: t.statusManual,
+      taxa: null,
+      dias: null,
+      tentativas: 0,
+      questoes: 0,
+      coberto: t.statusManual !== 'nao_visto'
+    };
+  }
+  return calcStatusAutomaticoTopico(t.nome, nomeDisciplina);
+}
+
 /** Calcula o status automático de toda uma disciplina (agregado de tópicos). */
 function calcStatusDisciplina(materia) {
   const topicosComDados = (materia.topicos || []).map(t =>
-    calcStatusAutomaticoTopico(t.nome, materia.nome)
+    calcStatusEfetivoTopico(t, materia.nome)
   );
   const comTentativa = topicosComDados.filter(s => s.tentativas > 0);
   if (!comTentativa.length) return { taxa: null, coberto: 0, total: topicosComDados.length };
@@ -722,15 +739,15 @@ const _STATUS_BUSSOLA = {
 let _bussolaEditalId  = null;
 let _bussolaFiltro    = 'todos';   // 'todos' | 'critico' | 'revisar' | 'nao_visto'
 let _bussolaExpandido = new Set(); // ids de disciplinas expandidas
-let _bussolaEditando  = null;      // { mi, ti, tipo } para edição inline
+let _bussolaEditando  = null;      // { tipo: 'materia'|'topico', mi, ti } — item em edição inline no momento
 
 function renderEditalDetalhe(view, idStr) {
   const id = Number(idStr);
   if (_bussolaEditalId !== id) {
     _bussolaFiltro    = 'todos';
     _bussolaExpandido = new Set();
-    _bussolaEditalId  = id;
     _bussolaEditando  = null;
+    _bussolaEditalId  = id;
   }
 
   const edital = state.editais.find(e => e.id === id);
@@ -741,7 +758,7 @@ function renderEditalDetalhe(view, idStr) {
   (edital.materias || []).forEach(m => {
     (m.topicos || []).forEach(t => {
       totalTopicos++;
-      const s = calcStatusAutomaticoTopico(t.nome, m.nome);
+      const s = calcStatusEfetivoTopico(t, m.nome);
       if (s.coberto)               cobertos++;
       if (s.status === 'critico')  criticos++;
       if (s.status === 'nao_visto') naoVistos++;
@@ -795,14 +812,29 @@ function renderEditalDetalhe(view, idStr) {
       <button class="chip ${_bussolaFiltro === 'nao_visto' ? 'active' : ''}" data-filtro-bussola="nao_visto">○ Não vistos</button>
     </div>
 
-    <!-- Botão adicionar disciplina -->
-    <div style="margin-bottom:16px;">
-      <button class="btn btn-primary" id="btn-add-disciplina-edital">+ Adicionar disciplina</button>
+    <!-- Ações da lista -->
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+      <button class="btn btn-secondary btn-sm" id="btn-bussola-add-disciplina">+ Adicionar disciplina</button>
     </div>
 
     <!-- Lista de disciplinas -->
     <div id="bussola-lista"></div>
   `;
+
+  $('#btn-bussola-add-disciplina')?.addEventListener('click', async () => {
+    const nome = prompt('Nome da nova disciplina:');
+    if (!nome || !nome.trim()) return;
+    edital.materias = edital.materias || [];
+    if (edital.materias.some(m => _norm(m.nome) === _norm(nome.trim()))) {
+      showToast('Já existe uma disciplina com esse nome neste edital.', 'error');
+      return;
+    }
+    edital.materias.push({ nome: nome.trim(), topicos: [] });
+    await db.editais.update(edital);
+    await reloadState();
+    showToast('Disciplina adicionada! ✓', 'success');
+    desenharLista();
+  });
 
   $('#btn-excluir-edital')?.addEventListener('click', async () => {
     // Só apaga o "quadro" do edital em si (disciplinas/tópicos e vínculos
@@ -818,19 +850,6 @@ function renderEditalDetalhe(view, idStr) {
     location.hash = '#/editais';
   });
 
-  // Adicionar nova disciplina ao edital
-  $('#btn-add-disciplina-edital')?.addEventListener('click', async () => {
-    const nome = prompt('Nome da nova disciplina:');
-    if (!nome || !nome.trim()) return;
-    edital.materias = edital.materias || [];
-    edital.materias.push({ nome: nome.trim(), topicos: [] });
-    await db.editais.update(edital);
-    await reloadState();
-    _bussolaExpandido.add(edital.materias.length - 1);
-    showToast('Disciplina adicionada!', 'success');
-    desenharLista();
-  });
-
   function desenharLista() {
     const lista = $('#bussola-lista');
     if (!lista) return;
@@ -840,11 +859,10 @@ function renderEditalDetalhe(view, idStr) {
       const taxaDisc  = discStats.taxa != null ? fmtPct(discStats.taxa) : '—';
       const cobPct    = discStats.total ? Math.round((discStats.coberto / discStats.total) * 100) : 0;
       const expandido = _bussolaExpandido.has(mi);
-      const editandoDisc = _bussolaEditando && _bussolaEditando.mi === mi && _bussolaEditando.tipo === 'disciplina';
 
       // Filtra tópicos
       const topicosFiltrados = (m.topicos || []).map((t, ti) => ({
-        t, ti, s: calcStatusAutomaticoTopico(t.nome, m.nome)
+        t, ti, s: calcStatusEfetivoTopico(t, m.nome)
       })).filter(({ s }) =>
         _bussolaFiltro === 'todos' || s.status === _bussolaFiltro
       );
@@ -852,28 +870,33 @@ function renderEditalDetalhe(view, idStr) {
       // Se filtro ativo e nenhum tópico da disciplina passa → oculta a disciplina
       if (_bussolaFiltro !== 'todos' && !topicosFiltrados.length) return '';
 
+      const editandoMateria = _bussolaEditando && _bussolaEditando.tipo === 'materia' && _bussolaEditando.mi === mi;
+
+      const nomeMateriaHtml = editandoMateria ? `
+        <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">
+          <input type="text" class="input bussola-edit-input" data-input-nome-materia="${mi}" value="${escapeHtml(m.nome)}"
+            style="font-size:14px;padding:4px 8px;flex:1;min-width:0;" />
+          <button class="btn btn-ghost btn-sm" data-salvar-materia="${mi}" title="Salvar">✓</button>
+          <button class="btn btn-ghost btn-sm" data-cancelar-edicao title="Cancelar">✕</button>
+        </div>
+      ` : `
+        <div style="font-size:15px;font-weight:700;font-family:var(--font-display);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span>${escapeHtml(m.nome)}</span>
+          <button class="bussola-icon-btn" data-editar-materia="${mi}" title="Editar disciplina" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;line-height:1;opacity:.75;">✏️</button>
+          <button class="bussola-icon-btn" data-deletar-materia="${mi}" title="Excluir disciplina" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;line-height:1;opacity:.75;">🗑️</button>
+        </div>
+      `;
+
       return `
         <div class="card mb-12 bussola-disc" data-mi="${mi}">
           <!-- Cabeçalho da disciplina (clicável pra expandir) -->
-          <div class="bussola-disc-header" data-toggle-disc="${mi}" style="cursor:pointer;">
+          <div class="bussola-disc-header" ${editandoMateria ? '' : `data-toggle-disc="${mi}"`} style="cursor:${editandoMateria ? 'default' : 'pointer'};">
             <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
               <svg class="bussola-chev ${expandido ? 'open' : ''}" viewBox="0 0 24 24" width="16" height="16">
                 <path fill="currentColor" d="M7 10l5 5 5-5z"/>
               </svg>
               <div style="flex:1;min-width:0;">
-                ${editandoDisc ? `
-                  <div style="display:flex;gap:6px;align-items:center;" onclick="event.stopPropagation();">
-                    <input type="text" id="edit-disc-${mi}" value="${escapeHtml(m.nome)}" style="font-weight:700;font-family:var(--font-display);font-size:15px;flex:1;padding:4px 8px;border-radius:6px;border:1px solid var(--gold);background:var(--surface);" onclick="event.stopPropagation();">
-                    <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();salvarNomeDisciplina(${edital.id},${mi})" style="padding:4px 10px;">✓</button>
-                    <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();cancelarEdicao()" style="padding:4px 10px;">✕</button>
-                  </div>
-                ` : `
-                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                    <span style="font-size:15px;font-weight:700;font-family:var(--font-display);">${escapeHtml(m.nome)}</span>
-                    <span class="icon-btn" onclick="event.stopPropagation();iniciarEdicaoDisciplina(${mi})" title="Editar nome" style="font-size:13px;opacity:.6;">✏️</span>
-                    <span class="icon-btn" onclick="event.stopPropagation();excluirDisciplina(${edital.id},${mi})" title="Excluir disciplina" style="font-size:13px;opacity:.6;color:var(--danger);">🗑️</span>
-                  </div>
-                `}
+                ${nomeMateriaHtml}
                 <div style="font-size:12px;color:var(--text-muted);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                   <span>${discStats.coberto}/${discStats.total} tópicos cobertos${discStats.taxa != null ? ` · taxa média ${taxaDisc}` : ''}</span>
                   ${(() => {
@@ -908,32 +931,36 @@ function renderEditalDetalhe(view, idStr) {
                 const diasTxt = s.dias != null
                   ? (s.dias === 0 ? 'Hoje' : `${s.dias}d atrás`)
                   : '—';
-                const editandoTopico = _bussolaEditando && _bussolaEditando.mi === mi && _bussolaEditando.ti === ti && _bussolaEditando.tipo === 'topico';
+                const editandoTopico = _bussolaEditando && _bussolaEditando.tipo === 'topico' && _bussolaEditando.mi === mi && _bussolaEditando.ti === ti;
+
+                const nomeTopicoHtml = editandoTopico ? `
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <input type="text" class="input bussola-edit-input" data-input-nome-topico="${mi}:${ti}" value="${escapeHtml(t.nome)}"
+                      style="font-size:13px;padding:4px 8px;flex:1;min-width:0;" />
+                    <button class="btn btn-ghost btn-sm" data-salvar-topico="${mi}:${ti}" title="Salvar">✓</button>
+                    <button class="btn btn-ghost btn-sm" data-cancelar-edicao title="Cancelar">✕</button>
+                  </div>
+                ` : `
+                  <div style="font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                    <span>${escapeHtml(t.nome)}</span>
+                    <button class="bussola-icon-btn" data-editar-topico="${mi}:${ti}" title="Editar tópico" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;line-height:1;opacity:.75;">✏️</button>
+                    <button class="bussola-icon-btn" data-deletar-topico="${mi}:${ti}" title="Excluir tópico" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;line-height:1;opacity:.75;">🗑️</button>
+                  </div>
+                `;
 
                 return `
-                  <div class="bussola-topico" style="border-left:3px solid ${cfg.cor};padding-left:12px;margin-bottom:10px;">
+                  <div class="bussola-topico" style="border-left:3px solid ${cfg.cor};">
                     <div style="flex:1;min-width:0;">
-                      ${editandoTopico ? `
-                        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-                          <input type="text" id="edit-top-${mi}-${ti}" value="${escapeHtml(t.nome)}" style="flex:1;padding:4px 8px;border-radius:6px;border:1px solid var(--gold);background:var(--surface);font-size:13.5px;">
-                          <button class="btn btn-sm btn-primary" onclick="salvarNomeTopico(${edital.id},${mi},${ti})" style="padding:4px 10px;">✓</button>
-                          <button class="btn btn-sm btn-ghost" onclick="cancelarEdicao()" style="padding:4px 10px;">✕</button>
-                        </div>
-                      ` : `
-                        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                          <span style="font-size:13.5px;font-weight:600;">${escapeHtml(t.nome)}</span>
-                          <span class="icon-btn" onclick="iniciarEdicaoTopico(${mi},${ti})" title="Editar nome" style="font-size:12px;opacity:.6;">✏️</span>
-                          <span class="icon-btn" onclick="excluirTopico(${edital.id},${mi},${ti})" title="Excluir tópico" style="font-size:12px;opacity:.6;color:var(--danger);">🗑️</span>
-                        </div>
-                      `}
+                      ${nomeTopicoHtml}
                       <div style="font-size:12px;color:var(--text-muted);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap;">
                         ${s.tentativas ? `<span>${s.tentativas} tent. · ${s.questoes} q.</span>` : ''}
                         ${s.taxa != null ? `<span>Taxa: <b style="color:${cfg.cor}">${taxaTxt}</b></span>` : ''}
                         ${s.dias != null ? `<span>Último: ${diasTxt}</span>` : ''}
                       </div>
                     </div>
-                    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap;">
-                      <span class="badge" style="background:${cfg.cor}22;color:${cfg.cor};font-size:11.5px;cursor:pointer;" onclick="toggleStatusTopico(${edital.id},${mi},${ti})" title="Clique para marcar como dominado/não visto">
+                    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                      <span class="badge bussola-status-badge" style="background:${cfg.cor}22;color:${cfg.cor};font-size:11.5px;cursor:pointer;"
+                        data-toggle-status="${mi}:${ti}" title="Clique para marcar como Dominado / Não visto">
                         ${cfg.icone} ${cfg.label}
                       </span>
                       <button class="btn btn-sm" data-estudar-mi="${mi}" data-estudar-ti="${ti}"
@@ -1071,6 +1098,145 @@ function renderEditalDetalhe(view, idStr) {
         desenharLista();
       });
     });
+
+    // Editar nome da disciplina (entra em modo de edição inline)
+    $$('[data-editar-materia]', lista).forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const mi = Number(btn.dataset.editarMateria);
+        _bussolaEditando = { tipo: 'materia', mi };
+        desenharLista();
+        const input = $(`[data-input-nome-materia="${mi}"]`, lista);
+        input?.focus();
+        input?.select();
+      });
+    });
+
+    // Excluir disciplina (e todos os seus tópicos)
+    $$('[data-deletar-materia]', lista).forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const mi = Number(btn.dataset.deletarMateria);
+        const m = edital.materias[mi];
+        if (!m) return;
+        const confirmar = confirm(`Excluir a disciplina "${m.nome}" e todos os seus ${((m.topicos || []).length)} tópicos?\n\nEsta ação não pode ser desfeita.`);
+        if (!confirmar) return;
+        edital.materias.splice(mi, 1);
+        _bussolaExpandido.delete(mi);
+        if (_bussolaEditando && _bussolaEditando.mi === mi) _bussolaEditando = null;
+        await db.editais.update(edital);
+        await reloadState();
+        showToast('Disciplina excluída.', 'success');
+        desenharLista();
+      });
+    });
+
+    // Editar nome do tópico (entra em modo de edição inline)
+    $$('[data-editar-topico]', lista).forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const [mi, ti] = btn.dataset.editarTopico.split(':').map(Number);
+        _bussolaEditando = { tipo: 'topico', mi, ti };
+        desenharLista();
+        const input = $(`[data-input-nome-topico="${mi}:${ti}"]`, lista);
+        input?.focus();
+        input?.select();
+      });
+    });
+
+    // Excluir tópico
+    $$('[data-deletar-topico]', lista).forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const [mi, ti] = btn.dataset.deletarTopico.split(':').map(Number);
+        const t = edital.materias[mi]?.topicos[ti];
+        if (!t) return;
+        const confirmar = confirm(`Excluir o tópico "${t.nome}"?\n\nEsta ação não pode ser desfeita.`);
+        if (!confirmar) return;
+        edital.materias[mi].topicos.splice(ti, 1);
+        if (_bussolaEditando && _bussolaEditando.tipo === 'topico' && _bussolaEditando.mi === mi && _bussolaEditando.ti === ti) _bussolaEditando = null;
+        await db.editais.update(edital);
+        await reloadState();
+        showToast('Tópico excluído.', 'success');
+        desenharLista();
+      });
+    });
+
+    // Salvar novo nome da disciplina
+    $$('[data-salvar-materia]', lista).forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const mi = Number(btn.dataset.salvarMateria);
+        const input = $(`[data-input-nome-materia="${mi}"]`, lista);
+        const novoNome = input?.value.trim();
+        if (!novoNome) { showToast('O nome não pode ficar em branco.', 'error'); return; }
+        edital.materias[mi].nome = novoNome;
+        _bussolaEditando = null;
+        await db.editais.update(edital);
+        await reloadState();
+        showToast('Disciplina renomeada! ✓', 'success');
+        desenharLista();
+      });
+    });
+
+    // Salvar novo nome do tópico
+    $$('[data-salvar-topico]', lista).forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const [mi, ti] = btn.dataset.salvarTopico.split(':').map(Number);
+        const input = $(`[data-input-nome-topico="${mi}:${ti}"]`, lista);
+        const novoNome = input?.value.trim();
+        if (!novoNome) { showToast('O nome não pode ficar em branco.', 'error'); return; }
+        edital.materias[mi].topicos[ti].nome = novoNome;
+        _bussolaEditando = null;
+        await db.editais.update(edital);
+        await reloadState();
+        showToast('Tópico renomeado! ✓', 'success');
+        desenharLista();
+      });
+    });
+
+    // Cancelar edição inline (disciplina ou tópico)
+    $$('[data-cancelar-edicao]', lista).forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _bussolaEditando = null;
+        desenharLista();
+      });
+    });
+
+    // Atalhos de teclado nos campos de edição inline: Enter salva, Esc cancela
+    $$('.bussola-edit-input', lista).forEach(input => {
+      input.addEventListener('click', e => e.stopPropagation());
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const alvo = input.dataset.inputNomeMateria != null
+            ? $(`[data-salvar-materia="${input.dataset.inputNomeMateria}"]`, lista)
+            : $(`[data-salvar-topico="${input.dataset.inputNomeTopico}"]`, lista);
+          alvo?.click();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          _bussolaEditando = null;
+          desenharLista();
+        }
+      });
+    });
+
+    // Badge de status clicável — alterna entre Dominado ⭐ e Não visto ○
+    $$('[data-toggle-status]', lista).forEach(badge => {
+      badge.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const [mi, ti] = badge.dataset.toggleStatus.split(':').map(Number);
+        const t = edital.materias[mi]?.topicos[ti];
+        if (!t) return;
+        const statusAtual = calcStatusEfetivoTopico(t, edital.materias[mi].nome).status;
+        t.statusManual = statusAtual === 'dominado' ? 'nao_visto' : 'dominado';
+        await db.editais.update(edital);
+        await reloadState();
+        desenharLista();
+      });
+    });
   }
 
   desenharLista();
@@ -1079,13 +1245,14 @@ function renderEditalDetalhe(view, idStr) {
   if (_bussolaExpandido.size === 0) {
     (edital.materias || []).forEach((m, mi) => {
       const temCritico = (m.topicos || []).some(t =>
-        calcStatusAutomaticoTopico(t.nome, m.nome).status === 'critico'
+        calcStatusEfetivoTopico(t, m.nome).status === 'critico'
       );
       if (temCritico) _bussolaExpandido.add(mi);
     });
     if (_bussolaExpandido.size > 0) desenharLista();
   }
 }
+
 /* ============================================================
    MATCHING EDITAL ↔ CICLO
    Tenta vincular automaticamente uma disciplina do edital a uma
@@ -1203,103 +1370,3 @@ function renderKanbanCard(t, mi, ti, stats) {
     </div>
   `;
 }
-
-
-/* ============================================================
-   FUNÇÕES DE EDIÇÃO DO EDITAL (adicionadas)
-   ============================================================ */
-
-window.iniciarEdicaoDisciplina = function(mi) {
-  _bussolaEditando = { mi, tipo: 'disciplina' };
-  const view = document.querySelector('.view') || document.getElementById('app');
-  if (view && _bussolaEditalId != null) renderEditalDetalhe(view, String(_bussolaEditalId));
-};
-
-window.salvarNomeDisciplina = async function(editalId, mi) {
-  const input = document.getElementById('edit-disc-' + mi);
-  if (!input) return;
-  const novoNome = input.value.trim();
-  if (!novoNome) { showToast('O nome não pode ficar vazio.', 'danger'); return; }
-  const edital = state.editais.find(e => e.id === editalId);
-  if (!edital) return;
-  edital.materias[mi].nome = novoNome;
-  await db.editais.update(edital);
-  await reloadState();
-  _bussolaEditando = null;
-  showToast('Disciplina renomeada!', 'success');
-  const view = document.querySelector('.view') || document.getElementById('app');
-  if (view) renderEditalDetalhe(view, String(editalId));
-};
-
-window.excluirDisciplina = async function(editalId, mi) {
-  const edital = state.editais.find(e => e.id === editalId);
-  if (!edital) return;
-  const nome = edital.materias[mi]?.nome;
-  const qtdTopicos = edital.materias[mi]?.topicos?.length || 0;
-  if (!confirm('Excluir a disciplina "' + nome + '"?\n\nTodos os ' + qtdTopicos + ' tópicos dela serão removidos. Esta ação não pode ser desfeita.')) return;
-  edital.materias.splice(mi, 1);
-  await db.editais.update(edital);
-  await reloadState();
-  _bussolaExpandido.delete(mi);
-  _bussolaEditando = null;
-  showToast('Disciplina excluída.', 'success');
-  const view = document.querySelector('.view') || document.getElementById('app');
-  if (view) renderEditalDetalhe(view, String(editalId));
-};
-
-window.iniciarEdicaoTopico = function(mi, ti) {
-  _bussolaEditando = { mi, ti, tipo: 'topico' };
-  const view = document.querySelector('.view') || document.getElementById('app');
-  if (view && _bussolaEditalId != null) renderEditalDetalhe(view, String(_bussolaEditalId));
-};
-
-window.salvarNomeTopico = async function(editalId, mi, ti) {
-  const input = document.getElementById('edit-top-' + mi + '-' + ti);
-  if (!input) return;
-  const novoNome = input.value.trim();
-  if (!novoNome) { showToast('O nome não pode ficar vazio.', 'danger'); return; }
-  const edital = state.editais.find(e => e.id === editalId);
-  if (!edital) return;
-  edital.materias[mi].topicos[ti].nome = novoNome;
-  await db.editais.update(edital);
-  await reloadState();
-  _bussolaEditando = null;
-  showToast('Tópico renomeado!', 'success');
-  const view = document.querySelector('.view') || document.getElementById('app');
-  if (view) renderEditalDetalhe(view, String(editalId));
-};
-
-window.excluirTopico = async function(editalId, mi, ti) {
-  const edital = state.editais.find(e => e.id === editalId);
-  if (!edital) return;
-  const nome = edital.materias[mi]?.topicos[ti]?.nome;
-  if (!confirm('Excluir o tópico "' + nome + '"?\n\nEsta ação não pode ser desfeita.')) return;
-  edital.materias[mi].topicos.splice(ti, 1);
-  await db.editais.update(edital);
-  await reloadState();
-  _bussolaEditando = null;
-  showToast('Tópico excluído.', 'success');
-  const view = document.querySelector('.view') || document.getElementById('app');
-  if (view) renderEditalDetalhe(view, String(editalId));
-};
-
-window.toggleStatusTopico = async function(editalId, mi, ti) {
-  const edital = state.editais.find(e => e.id === editalId);
-  if (!edital) return;
-  const topico = edital.materias[mi].topicos[ti];
-  const statusAtual = topico.statusManual || 'nao_visto';
-  const novoStatus = statusAtual === 'dominado' ? 'nao_visto' : 'dominado';
-  topico.statusManual = novoStatus;
-  topico.status = novoStatus;
-  await db.editais.update(edital);
-  await reloadState();
-  showToast(novoStatus === 'dominado' ? 'Marcado como dominado! ⭐' : 'Marcado como não visto.', 'success');
-  const view = document.querySelector('.view') || document.getElementById('app');
-  if (view) renderEditalDetalhe(view, String(editalId));
-};
-
-window.cancelarEdicao = function() {
-  _bussolaEditando = null;
-  const view = document.querySelector('.view') || document.getElementById('app');
-  if (view && _bussolaEditalId != null) renderEditalDetalhe(view, String(_bussolaEditalId));
-};
