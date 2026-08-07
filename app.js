@@ -356,6 +356,7 @@ const PAGE_TITLES = {
   'revisao': 'Revisão do Dia',
   'evolucao-revisao': 'Evolução da Revisão',
   'diagnostico': 'Diagnóstico de Erros',
+  'mentor': 'Mentor IA',
   'estatisticas/disciplinas': 'Estatísticas por Disciplina',
   'estatisticas/assuntos': 'Estatísticas por Assunto',
   'estatisticas/bancas': 'Estatísticas por Banca',
@@ -469,6 +470,10 @@ async function router() {
     $('#page-title').textContent = PAGE_TITLES['evolucao-revisao'];
     updateActiveNav('revisao');
     if (typeof renderEvolucaoRevisao === 'function') renderEvolucaoRevisao(view);
+  } else if (base === 'mentor') {
+    $('#page-title').textContent = PAGE_TITLES['mentor'];
+    updateActiveNav('mentor');
+    if (typeof renderMentorIA === 'function') renderMentorIA(view);
   } else if (base === 'diagnostico') {
     $('#page-title').textContent = PAGE_TITLES['diagnostico'];
     updateActiveNav('diagnostico');
@@ -739,6 +744,8 @@ function renderDashboard(view) {
       <div class="stat-card info"><div class="label">Tempo esta semana</div><div class="value">${_formatarMinutos(minutosSemanaCiclo)}</div></div>
     </div>
 
+    <div class="card mb-12" id="card-mentor-dashboard"></div>
+
     <div class="card mb-12" id="card-recomendacao-dia"></div>
 
     <div class="card mb-12" id="card-relatorio-diario"></div>
@@ -832,6 +839,9 @@ function renderDashboard(view) {
   try { initDashboardEditalChart(); } catch (err) { console.error('Erro em initDashboardEditalChart:', err); }
   try { renderStatsPorDisciplina(); } catch (err) { console.error('Erro em renderStatsPorDisciplina:', err); }
   try { renderTempoPorTipoCicloDashboard(); } catch (err) { console.error('Erro em renderTempoPorTipoCicloDashboard:', err); }
+  try {
+    if (typeof renderCardMentorDashboard === 'function') renderCardMentorDashboard().catch(err => console.error('Erro em renderCardMentorDashboard:', err));
+  } catch (err) { console.error('Erro em renderCardMentorDashboard:', err); }
   try {
     if (typeof renderCardRecomendacaoDia === 'function') renderCardRecomendacaoDia().catch(err => console.error('Erro em renderCardRecomendacaoDia:', err));
   } catch (err) { console.error('Erro em renderCardRecomendacaoDia:', err); }
