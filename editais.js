@@ -901,12 +901,17 @@ function renderEditalDetalhe(view, idStr) {
                   <span>${discStats.coberto}/${discStats.total} tópicos cobertos${discStats.taxa != null ? ` · taxa média ${taxaDisc}` : ''}</span>
                   ${(() => {
                     const mc = _resolverMateriaCiclo(m);
-                    if (!mc) return `<span class="bussola-ciclo-vinculo sem-vinculo" data-vincular-mi="${mi}" title="Vincular ao Ciclo de Estudos">⬡ sem vínculo com ciclo</span>`;
+                    if (!mc) return `
+                      <button class="btn btn-sm" style="font-size:11px;padding:2px 8px;border:1px dashed var(--border);background:transparent;color:var(--text-muted);"
+                        data-vincular-mi="${mi}" title="O nome desta disciplina pode estar diferente do Ciclo — clique para vincular manualmente">
+                        🔗 Vincular ao ciclo
+                      </button>`;
                     const auto = !m.cicloMateriaId;
                     const tempo = _formatarMinutos(mc.minutosFeitos || 0);
-                    return `<span class="bussola-ciclo-vinculo com-vinculo" data-vincular-mi="${mi}" title="${auto ? 'Vínculo automático com ciclo (clique para alterar)' : 'Clique para alterar vínculo'}">
-                      ⏱️ ${escapeHtml(mc.nome)} · ${tempo}${auto ? ' <small style="opacity:.7">(auto)</small>' : ''}
-                    </span>`;
+                    return `<button class="btn btn-sm" style="font-size:11px;padding:2px 8px;background:var(--surface-2,var(--surface));border:1px solid var(--border);color:var(--text-muted);"
+                      data-vincular-mi="${mi}" title="${auto ? 'Vínculo automático — clique para corrigir se o nome estiver errado' : 'Clique para alterar o vínculo com o ciclo'}">
+                      ⏱️ ${escapeHtml(mc.nome)} · ${tempo}${auto ? ' <small style="opacity:.6">(auto)</small>' : ' ✎'}
+                    </button>`;
                   })()}
                 </div>
               </div>
@@ -959,10 +964,17 @@ function renderEditalDetalhe(view, idStr) {
                       </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-                      <span class="badge bussola-status-badge" style="background:${cfg.cor}22;color:${cfg.cor};font-size:11.5px;cursor:pointer;"
-                        data-toggle-status="${mi}:${ti}" title="Clique para marcar como Dominado / Não visto">
-                        ${cfg.icone} ${cfg.label}
-                      </span>
+                      ${s.status === 'nao_visto' || !s.tentativas ? `
+                        <button class="btn btn-sm" style="background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:11.5px;"
+                          data-toggle-status="${mi}:${ti}" title="Marcar como visto">
+                          ○ Marcar visto
+                        </button>
+                      ` : `
+                        <span class="badge bussola-status-badge" style="background:${cfg.cor}22;color:${cfg.cor};font-size:11.5px;cursor:pointer;"
+                          data-toggle-status="${mi}:${ti}" title="Clique para desmarcar como visto">
+                          ${cfg.icone} ${cfg.label}
+                        </span>
+                      `}
                       <button class="btn btn-sm" data-estudar-mi="${mi}" data-estudar-ti="${ti}"
                         title="Iniciar sessão de estudo no Ciclo para ${escapeHtml(t.nome)}">▶ Estudar</button>
                     </div>
@@ -1223,7 +1235,7 @@ function renderEditalDetalhe(view, idStr) {
       });
     });
 
-    // Badge de status clicável — alterna entre Dominado ⭐ e Não visto ○
+    // Badge/botão de status clicável — alterna entre Visto (dominado) e Não visto
     $$('[data-toggle-status]', lista).forEach(badge => {
       badge.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -1231,7 +1243,15 @@ function renderEditalDetalhe(view, idStr) {
         const t = edital.materias[mi]?.topicos[ti];
         if (!t) return;
         const statusAtual = calcStatusEfetivoTopico(t, edital.materias[mi].nome).status;
-        t.statusManual = statusAtual === 'dominado' ? 'nao_visto' : 'dominado';
+        if (statusAtual === 'nao_visto') {
+          // Marcar como visto (dominado manual)
+          t.statusManual = 'dominado';
+          showToast('Tópico marcado como visto ⭐', 'success');
+        } else {
+          // Desmarcar — remove override manual, volta ao cálculo automático
+          delete t.statusManual;
+          showToast('Marcação removida — status voltará ao automático', '');
+        }
         await db.editais.update(edital);
         await reloadState();
         desenharLista();
