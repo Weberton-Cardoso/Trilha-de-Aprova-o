@@ -862,52 +862,51 @@ function renderEditalDetalhe(view, idStr) {
       if (_bussolaFiltro !== 'todos' && !topicosFiltrados.length) return '';
 
       const editandoMateria = _bussolaEditando && _bussolaEditando.tipo === 'materia' && _bussolaEditando.mi === mi;
-      const nomeMateriaHtml = editandoMateria
-        ? `<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">
-             <input type="text" class="input bussola-edit-input" data-input-nome-materia="${mi}" value="${escapeHtml(m.nome)}"
-               style="font-size:14px;padding:4px 8px;flex:1;min-width:0;" />
-             <button class="btn btn-ghost btn-sm" data-salvar-materia="${mi}" title="Salvar">✓</button>
-             <button class="btn btn-ghost btn-sm" data-cancelar-edicao title="Cancelar">✕</button>
-           </div>`
-        : `<div style="font-size:15px;font-weight:700;font-family:var(--font-display);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-             <span>${escapeHtml(m.nome)}</span>
-             <button class="bussola-btn-acao" data-editar-materia="${mi}" title="Renomear disciplina">✏️</button>
-             <button class="bussola-btn-acao" data-deletar-materia="${mi}" title="Excluir disciplina">🗑️</button>
-           </div>`;
+      const mc = _resolverMateriaCiclo(m);
+      const auto = mc && !m.cicloMateriaId;
+      const tempoMc = mc ? _formatarMinutos(mc.minutosFeitos || 0) : null;
 
       return `
         <div class="card mb-12 bussola-disc" data-mi="${mi}">
-          <!-- Cabeçalho da disciplina (clicável pra expandir) -->
           <div class="bussola-disc-header" ${editandoMateria ? '' : `data-toggle-disc="${mi}"`} style="cursor:${editandoMateria ? 'default' : 'pointer'};">
-            <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
-              <svg class="bussola-chev ${expandido ? 'open' : ''}" viewBox="0 0 24 24" width="16" height="16">
+            <div class="bussola-disc-top">
+              <svg class="bussola-chev ${expandido ? 'open' : ''}" viewBox="0 0 24 24" width="16" height="16" style="flex-shrink:0;margin-top:2px;">
                 <path fill="currentColor" d="M7 10l5 5 5-5z"/>
               </svg>
-              <div style="flex:1;min-width:0;">
-                ${nomeMateriaHtml}
-                <div style="font-size:12px;color:var(--text-muted);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                  <span>${discStats.coberto}/${discStats.total} tópicos cobertos${discStats.taxa != null ? ` · taxa média ${taxaDisc}` : ''}</span>
-                  ${(() => {
-                    const mc = _resolverMateriaCiclo(m);
-                    if (!mc) return `<button style="font-size:11px;padding:2px 8px;border:1px dashed var(--border);background:transparent;color:var(--text-muted);border-radius:4px;cursor:pointer;" data-vincular-mi="${mi}" title="Nome pode estar diferente do Ciclo — clique para vincular">🔗 Vincular ao ciclo</button>`;
-                    const auto = !m.cicloMateriaId;
-                    const tempo = _formatarMinutos(mc.minutosFeitos || 0);
-                    return `<button style="font-size:11px;padding:2px 8px;border:1px solid var(--border);background:transparent;color:var(--text-muted);border-radius:4px;cursor:pointer;" data-vincular-mi="${mi}" title="${auto ? 'Vínculo automático — clique para corrigir se estiver errado' : 'Clique para alterar vínculo'}">⏱️ ${escapeHtml(mc.nome)} · ${tempo}${auto ? ' (auto)' : ' ✎'}</button>`;
-                  })()}
-                </div>
+              ${editandoMateria
+                ? `<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">
+                     <input type="text" class="input bussola-edit-input" data-input-nome-materia="${mi}" value="${escapeHtml(m.nome)}"
+                       style="font-size:14px;padding:4px 8px;flex:1;min-width:0;" />
+                     <button class="btn btn-ghost btn-sm" data-salvar-materia="${mi}">✓</button>
+                     <button class="btn btn-ghost btn-sm" data-cancelar-edicao>✕</button>
+                   </div>`
+                : `<div style="flex:1;min-width:0;">
+                     <div class="bussola-disc-nome">
+                       ${escapeHtml(m.nome)}
+                       <span class="bussola-disc-acoes">
+                         <button class="bussola-btn-acao" data-editar-materia="${mi}" title="Renomear">✏️</button>
+                         <button class="bussola-btn-acao" data-deletar-materia="${mi}" title="Excluir">🗑️</button>
+                       </span>
+                     </div>
+                     <div class="bussola-disc-meta">
+                       <span>${discStats.coberto}/${discStats.total} tópicos${discStats.taxa != null ? ` · ${taxaDisc}` : ''}</span>
+                       ${mc
+                         ? `<button class="bussola-ciclo-vinculo com-vinculo" data-vincular-mi="${mi}" title="${auto ? 'Vínculo automático' : 'Alterar vínculo'}">
+                              ⏱️ ${escapeHtml(mc.nome)} · ${tempoMc}
+                            </button>`
+                         : `<button class="bussola-ciclo-vinculo sem-vinculo" data-vincular-mi="${mi}" title="Vincular ao ciclo">
+                              🔗 Vincular
+                            </button>`
+                       }
+                     </div>
+                   </div>`
+              }
+              <div class="bussola-disc-prog">
+                <div class="bussola-prog-bar"><span style="width:${cobPct}%"></span></div>
+                <span class="bussola-prog-pct">${cobPct}%</span>
               </div>
-            </div>
-            <!-- Mini barra de progresso da disciplina -->
-            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-              <div class="pct-bar-wrap" style="width:80px;margin:0;">
-                <div class="pct-bar" style="width:80px;height:5px;border-radius:3px;">
-                  <span style="width:${cobPct}%;background:var(--success);border-radius:3px;"></span>
-                </div>
-              </div>
-              <span style="font-size:12px;color:var(--text-muted);min-width:30px;">${cobPct}%</span>
             </div>
           </div>
-
           <!-- Tópicos (visíveis só se expandido) -->
           ${expandido ? `
             <div class="bussola-topicos" style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">
