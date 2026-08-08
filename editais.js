@@ -664,18 +664,28 @@ function initDashboardEditalChart() {
 function calcStatusAutomaticoTopico(nomeTopico, nomeDisciplina) {
   const hoje = new Date().toISOString().slice(0, 10);
 
-  // 1) Tentativas por assunto (match exato normalizado)
-  const porAssunto = state.tentativas.filter(t => _norm(t.assunto) === _norm(nomeTopico));
+  // 1) Tentativas por assunto — match exato normalizado
+  const porAssunto = state.tentativas.filter(t =>
+    t.assunto && _norm(t.assunto) === _norm(nomeTopico)
+  );
 
-  // 2) Tentativas por disciplina (fallback quando não há por assunto)
+  // 2) Fallback: tentativas por disciplina (match exato ou por sigla/similaridade)
+  //    Usado quando o assunto não bate com nenhum tópico — distribui os dados
+  //    da disciplina proporcionalmente entre os tópicos sem match de assunto.
   const porDisciplina = nomeDisciplina
-    ? state.tentativas.filter(t => _norm(t.disciplina) === _norm(nomeDisciplina))
+    ? state.tentativas.filter(t => {
+        if (_norm(t.disciplina) === _norm(nomeDisciplina)) return true;
+        // aceita sigla: "AFO" bate com "Administração Financeira e Orçamentária"
+        if (_calcScoreSimilaridade(t.disciplina || '', nomeDisciplina) >= 0.8) return true;
+        return false;
+      })
     : [];
 
-  const lista = porAssunto.length ? porAssunto : [];
+  // Prioridade: assunto exato > disciplina (só quando assunto está vazio na tentativa)
+  const tentativasSemAssunto = porDisciplina.filter(t => !t.assunto || t.assunto.trim() === '');
+  const lista = porAssunto.length ? porAssunto : tentativasSemAssunto;
 
   if (!lista.length) {
-    // Sem nenhuma tentativa vinculada ao tópico
     return { status: 'nao_visto', taxa: null, dias: null, tentativas: 0, questoes: 0, coberto: false };
   }
 
@@ -706,13 +716,26 @@ function calcStatusEfetivoTopico(t, nomeDisciplina) {
   return calcStatusAutomaticoTopico(t.nome, nomeDisciplina);
 }
 
-/** Calcula o status automático de toda uma disciplina (agregado de tópicos). */
+/** Calcula o status automático de toda uma disciplina (agregado de tópicos).
+ *  Se nenhum tópico tem tentativa por assunto, usa as tentativas da disciplina
+ *  como um todo (campo disciplina das tentativas) para mostrar taxa média. */
 function calcStatusDisciplina(materia) {
   const topicosComDados = (materia.topicos || []).map(t =>
     calcStatusEfetivoTopico(t, materia.nome)
   );
   const comTentativa = topicosComDados.filter(s => s.tentativas > 0);
-  if (!comTentativa.length) return { taxa: null, coberto: 0, total: topicosComDados.length };
+
+  // Fallback: tentativas da disciplina como um todo (sem assunto específico)
+  if (!comTentativa.length) {
+    const tentDisc = state.tentativas.filter(t =>
+      _norm(t.disciplina) === _norm(materia.nome) ||
+      _calcScoreSimilaridade(t.disciplina || '', materia.nome) >= 0.8
+    );
+    if (!tentDisc.length) return { taxa: null, coberto: 0, total: topicosComDados.length };
+    const r = calcResumo(tentDisc);
+    const coberto = topicosComDados.filter(s => s.coberto).length;
+    return { taxa: r.taxa, coberto, total: topicosComDados.length };
+  }
 
   const taxaMedia = comTentativa.reduce((s, x) => s + x.taxa, 0) / comTentativa.length;
   const coberto   = topicosComDados.filter(s => s.coberto).length;
@@ -850,8 +873,6 @@ function renderEditalDetalhe(view, idStr) {
       const taxaDisc  = discStats.taxa != null ? fmtPct(discStats.taxa) : '—';
       const cobPct    = discStats.total ? Math.round((discStats.coberto / discStats.total) * 100) : 0;
       const expandido = _bussolaExpandido.has(mi);
-      const mc        = _resolverMateriaCiclo(m);
-      const tempoDisc = mc ? _formatarMinutos(mc.minutosFeitos || 0) : null;
 
       // Filtra tópicos
       const topicosFiltrados = (m.topicos || []).map((t, ti) => ({
@@ -860,138 +881,106 @@ function renderEditalDetalhe(view, idStr) {
         _bussolaFiltro === 'todos' || s.status === _bussolaFiltro
       );
 
+      // Se filtro ativo e nenhum tópico da disciplina passa → oculta a disciplina
       if (_bussolaFiltro !== 'todos' && !topicosFiltrados.length) return '';
 
       const editandoMateria = _bussolaEditando && _bussolaEditando.tipo === 'materia' && _bussolaEditando.mi === mi;
+      const nomeMateriaHtml = editandoMateria
+        ? `<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">
+             <input type="text" class="input bussola-edit-input" data-input-nome-materia="${mi}" value="${escapeHtml(m.nome)}"
+               style="font-size:14px;padding:4px 8px;flex:1;min-width:0;" />
+             <button class="btn btn-ghost btn-sm" data-salvar-materia="${mi}" title="Salvar">✓</button>
+             <button class="btn btn-ghost btn-sm" data-cancelar-edicao title="Cancelar">✕</button>
+           </div>`
+        : `<div style="font-size:15px;font-weight:700;font-family:var(--font-display);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+             <span>${escapeHtml(m.nome)}</span>
+             <button style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 4px;opacity:.7;" data-editar-materia="${mi}" title="Renomear disciplina">✏️</button>
+             <button style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 4px;opacity:.7;" data-deletar-materia="${mi}" title="Excluir disciplina">🗑️</button>
+           </div>`;
 
       return `
         <div class="card mb-12 bussola-disc" data-mi="${mi}">
-
-          <!-- ── Cabeçalho da disciplina ── -->
-          <div class="bussola-disc-header" ${editandoMateria ? '' : `data-toggle-disc="${mi}"`}
-               style="cursor:${editandoMateria ? 'default' : 'pointer'};">
-
-            ${editandoMateria
-              ? `<div style="display:flex;align-items:center;gap:6px;width:100%;">
-                   <input type="text" class="input bussola-edit-input" data-input-nome-materia="${mi}"
-                     value="${escapeHtml(m.nome)}" style="font-size:14px;padding:4px 8px;flex:1;min-width:0;" />
-                   <button class="btn btn-ghost btn-sm" data-salvar-materia="${mi}">✓</button>
-                   <button class="btn btn-ghost btn-sm" data-cancelar-edicao>✕</button>
-                 </div>`
-              : `<div class="ed-disc-header-grid">
-                   <!-- Coluna esquerda: chevron + info -->
-                   <div class="ed-disc-left">
-                     <svg class="bussola-chev ${expandido ? 'open' : ''}" viewBox="0 0 24 24" width="16" height="16">
-                       <path fill="currentColor" d="M7 10l5 5 5-5z"/>
-                     </svg>
-                     <div class="ed-disc-info">
-                       <div class="ed-disc-nome">
-                         ${escapeHtml(m.nome)}
-                         <span class="ed-disc-acoes">
-                           <button class="bussola-btn-acao" data-editar-materia="${mi}" title="Renomear">✏️</button>
-                           <button class="bussola-btn-acao" data-deletar-materia="${mi}" title="Excluir">🗑️</button>
-                         </span>
-                       </div>
-                       <div class="ed-disc-meta">
-                         <span>${discStats.coberto}/${discStats.total} tópicos
-                           ${discStats.taxa != null ? `· <b>${taxaDisc}</b>` : ''}
-                         </span>
-                         ${mc
-                           ? `<button class="bussola-ciclo-vinculo com-vinculo" data-vincular-mi="${mi}">
-                                ⏱️ ${escapeHtml(mc.nome)} · ${tempoDisc}
-                              </button>`
-                           : `<button class="bussola-ciclo-vinculo sem-vinculo" data-vincular-mi="${mi}">
-                                🔗 Vincular ao ciclo
-                              </button>`
-                         }
-                       </div>
-                     </div>
-                   </div>
-                   <!-- Coluna direita: barra + % -->
-                   <div class="ed-disc-prog">
-                     <div class="ed-prog-bar"><span style="width:${cobPct}%"></span></div>
-                     <span class="ed-prog-pct">${cobPct}%</span>
-                   </div>
-                 </div>`
-            }
+          <!-- Cabeçalho da disciplina (clicável pra expandir) -->
+          <div class="bussola-disc-header" ${editandoMateria ? '' : `data-toggle-disc="${mi}"`} style="cursor:${editandoMateria ? 'default' : 'pointer'};">
+            <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
+              <svg class="bussola-chev ${expandido ? 'open' : ''}" viewBox="0 0 24 24" width="16" height="16">
+                <path fill="currentColor" d="M7 10l5 5 5-5z"/>
+              </svg>
+              <div style="flex:1;min-width:0;">
+                ${nomeMateriaHtml}
+                <div style="font-size:12px;color:var(--text-muted);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                  <span>${discStats.coberto}/${discStats.total} tópicos cobertos${discStats.taxa != null ? ` · taxa média ${taxaDisc}` : ''}</span>
+                  ${(() => {
+                    const mc = _resolverMateriaCiclo(m);
+                    if (!mc) return `<button style="font-size:11px;padding:2px 8px;border:1px dashed var(--border);background:transparent;color:var(--text-muted);border-radius:4px;cursor:pointer;" data-vincular-mi="${mi}" title="Nome pode estar diferente do Ciclo — clique para vincular">🔗 Vincular ao ciclo</button>`;
+                    const auto = !m.cicloMateriaId;
+                    const tempo = _formatarMinutos(mc.minutosFeitos || 0);
+                    return `<button style="font-size:11px;padding:2px 8px;border:1px solid var(--border);background:transparent;color:var(--text-muted);border-radius:4px;cursor:pointer;" data-vincular-mi="${mi}" title="${auto ? 'Vínculo automático — clique para corrigir se estiver errado' : 'Clique para alterar vínculo'}">⏱️ ${escapeHtml(mc.nome)} · ${tempo}${auto ? ' (auto)' : ' ✎'}</button>`;
+                  })()}
+                </div>
+              </div>
+            </div>
+            <!-- Mini barra de progresso da disciplina -->
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+              <div class="pct-bar-wrap" style="width:80px;margin:0;">
+                <div class="pct-bar" style="width:80px;height:5px;border-radius:3px;">
+                  <span style="width:${cobPct}%;background:var(--success);border-radius:3px;"></span>
+                </div>
+              </div>
+              <span style="font-size:12px;color:var(--text-muted);min-width:30px;">${cobPct}%</span>
+            </div>
           </div>
 
-          <!-- ── Tópicos ── -->
+          <!-- Tópicos (visíveis só se expandido) -->
           ${expandido ? `
-            <div class="bussola-topicos">
-              ${topicosFiltrados.length
-                ? topicosFiltrados.map(({ t, ti, s }) => {
-                    const cfg      = _STATUS_BUSSOLA[s.status];
-                    const taxaTxt  = s.taxa != null ? fmtPct(s.taxa) : null;
-                    const diasTxt  = s.dias != null ? (s.dias === 0 ? 'Hoje' : `${s.dias}d atrás`) : null;
-                    const editandoTopico = _bussolaEditando?.tipo === 'topico'
-                      && _bussolaEditando.mi === mi && _bussolaEditando.ti === ti;
+            <div class="bussola-topicos" style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">
+              ${topicosFiltrados.length ? topicosFiltrados.map(({ t, ti, s }) => {
+                const cfg    = _STATUS_BUSSOLA[s.status];
+                const taxaTxt = s.taxa != null ? fmtPct(s.taxa) : '—';
+                const diasTxt = s.dias != null
+                  ? (s.dias === 0 ? 'Hoje' : `${s.dias}d atrás`)
+                  : '—';
+                const editandoTopico = _bussolaEditando && _bussolaEditando.tipo === 'topico' && _bussolaEditando.mi === mi && _bussolaEditando.ti === ti;
+                const nomeTopicoHtml = editandoTopico
+                  ? `<div style="display:flex;align-items:center;gap:6px;">
+                       <input type="text" class="input bussola-edit-input" data-input-nome-topico="${mi}:${ti}" value="${escapeHtml(t.nome)}"
+                         style="font-size:13px;padding:4px 8px;flex:1;min-width:0;" />
+                       <button class="btn btn-ghost btn-sm" data-salvar-topico="${mi}:${ti}" title="Salvar">✓</button>
+                       <button class="btn btn-ghost btn-sm" data-cancelar-edicao title="Cancelar">✕</button>
+                     </div>`
+                  : `<div style="font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+                       <span>${escapeHtml(t.nome)}</span>
+                       <button style="background:none;border:none;cursor:pointer;font-size:11px;padding:1px 3px;opacity:.65;" data-editar-topico="${mi}:${ti}" title="Renomear tópico">✏️</button>
+                       <button style="background:none;border:none;cursor:pointer;font-size:11px;padding:1px 3px;opacity:.65;" data-deletar-topico="${mi}:${ti}" title="Excluir tópico">🗑️</button>
+                     </div>`;
 
-                    return `
-                      <div class="ed-topico" style="border-left:3px solid ${cfg.cor};">
+                return `
+                  <div class="bussola-topico" style="border-left:3px solid ${cfg.cor};">
+                    <div style="flex:1;min-width:0;">
+                      ${nomeTopicoHtml}
+                      <div style="font-size:12px;color:var(--text-muted);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap;">
+                        ${s.tentativas ? `<span>${s.tentativas} tent. · ${s.questoes} q.</span>` : ''}
+                        ${s.taxa != null ? `<span>Taxa: <b style="color:${cfg.cor}">${taxaTxt}</b></span>` : ''}
+                        ${s.dias != null ? `<span>Último: ${diasTxt}</span>` : ''}
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                      ${s.status === 'nao_visto'
+                        ? `<button class="btn btn-sm" style="border:1px solid var(--border);background:transparent;color:var(--text-muted);font-size:11.5px;white-space:nowrap;"
+                             data-toggle-status="${mi}:${ti}" title="Marcar este tópico como visto">○ Marcar visto</button>`
+                        : `<span class="badge" style="background:${cfg.cor}22;color:${cfg.cor};font-size:11.5px;cursor:pointer;"
+                             data-toggle-status="${mi}:${ti}" title="Clique para desmarcar">
+                             ${cfg.icone} ${cfg.label}
+                           </span>`
+                      }
+                      <button class="btn btn-sm" data-estudar-mi="${mi}" data-estudar-ti="${ti}"
+                        title="Iniciar sessão de estudo no Ciclo para ${escapeHtml(t.nome)}">▶ Estudar</button>
+                    </div>
+                  </div>`;
+              }).join('') : `<p class="text-muted" style="font-size:13px;padding:8px 0;">Nenhum tópico com este filtro.</p>`}
 
-                        <!-- Nome + botões editar/deletar -->
-                        ${editandoTopico
-                          ? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-                               <input type="text" class="input bussola-edit-input"
-                                 data-input-nome-topico="${mi}:${ti}" value="${escapeHtml(t.nome)}"
-                                 style="font-size:13px;padding:4px 8px;flex:1;min-width:0;" />
-                               <button class="btn btn-ghost btn-sm" data-salvar-topico="${mi}:${ti}">✓</button>
-                               <button class="btn btn-ghost btn-sm" data-cancelar-edicao>✕</button>
-                             </div>`
-                          : `<div class="ed-topico-nome">
-                               <span>${escapeHtml(t.nome)}</span>
-                               <span class="ed-topico-acoes">
-                                 <button class="bussola-btn-acao" data-editar-topico="${mi}:${ti}" title="Renomear">✏️</button>
-                                 <button class="bussola-btn-acao" data-deletar-topico="${mi}:${ti}" title="Excluir">🗑️</button>
-                               </span>
-                             </div>`
-                        }
-
-                        <!-- Dados de desempenho -->
-                        <div class="ed-topico-stats">
-                          ${s.tentativas
-                            ? `<span class="ed-stat-pill">📝 ${s.questoes} questões · ${s.tentativas} tent.</span>`
-                            : `<span class="ed-stat-pill muted">Sem tentativas</span>`
-                          }
-                          ${taxaTxt
-                            ? `<span class="ed-stat-pill" style="color:${cfg.cor};border-color:${cfg.cor}44;">
-                                 ✓ ${taxaTxt} acerto
-                               </span>`
-                            : ''
-                          }
-                          ${diasTxt
-                            ? `<span class="ed-stat-pill">🗓️ ${diasTxt}</span>`
-                            : ''
-                          }
-                          ${tempoDisc
-                            ? `<span class="ed-stat-pill">⏱️ ${tempoDisc} no ciclo</span>`
-                            : ''
-                          }
-                        </div>
-
-                        <!-- Ações: status + estudar -->
-                        <div class="ed-topico-acoes-row">
-                          ${s.status === 'nao_visto'
-                            ? `<button class="ed-btn-status" data-toggle-status="${mi}:${ti}">
-                                 ○ Marcar visto
-                               </button>`
-                            : `<button class="ed-btn-status active" data-toggle-status="${mi}:${ti}"
-                                 style="color:${cfg.cor};border-color:${cfg.cor}55;background:${cfg.cor}11;">
-                                 ${cfg.icone} ${cfg.label}
-                               </button>`
-                          }
-                          <button class="btn btn-sm ed-btn-estudar"
-                            data-estudar-mi="${mi}" data-estudar-ti="${ti}">
-                            ▶ Estudar
-                          </button>
-                        </div>
-
-                      </div>`;
-                  }).join('')
-                : `<p class="text-muted" style="font-size:13px;padding:8px 0 4px;">Nenhum tópico com este filtro.</p>`
-              }
-              <button class="btn btn-ghost btn-sm" style="margin-top:8px;width:100%;" data-add-topico="${mi}">
+              <!-- Botão pra adicionar tópico novo -->
+              <button class="btn btn-ghost btn-sm" style="margin-top:10px;width:100%;" data-add-topico="${mi}">
                 + Adicionar tópico
               </button>
             </div>
@@ -1320,13 +1309,13 @@ function _resolverMateriaCiclo(materiaEdital) {
     if (vinculada) return vinculada;
   }
 
-  // 2. Matching automático por score
+  // 2. Matching automático por score (threshold 0.4 — aceita siglas e abreviações)
   let melhor = null, melhorScore = 0;
   for (const m of cicloMaterias) {
     const score = _calcScoreSimilaridade(materiaEdital.nome, m.nome);
     if (score > melhorScore) { melhorScore = score; melhor = m; }
   }
-  return melhorScore >= 0.5 ? melhor : null;
+  return melhorScore >= 0.4 ? melhor : null;
 }
 
 function renderKanbanCard(t, mi, ti, stats) {
