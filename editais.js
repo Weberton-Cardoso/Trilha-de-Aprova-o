@@ -1152,10 +1152,12 @@ function renderEditalDetalhe(view, idStr) {
         const nome = inp?.value.trim();
         if (!nome) { showToast('O nome não pode ficar em branco.', 'error'); return; }
         edital.materias[mi].nome = nome;
+        edital.materias[mi].cicloMateriaId = null;
         _bussolaEditando = null;
         await db.editais.update(edital);
         await reloadState();
-        showToast('Disciplina renomeada! ✓', 'success');
+        const novoVinculo = _resolverMateriaCiclo(edital.materias[mi]);
+        showToast(novoVinculo ? `Disciplina renomeada e vinculada a "${novoVinculo.nome}" ✓` : 'Disciplina renomeada! Use 🔗 para vincular ao ciclo.', 'success');
         desenharLista();
       });
     });
