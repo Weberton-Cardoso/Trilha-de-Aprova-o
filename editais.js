@@ -871,8 +871,8 @@ function renderEditalDetalhe(view, idStr) {
            </div>`
         : `<div style="font-size:15px;font-weight:700;font-family:var(--font-display);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
              <span>${escapeHtml(m.nome)}</span>
-             <button style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 4px;opacity:.7;" data-editar-materia="${mi}" title="Renomear disciplina">✏️</button>
-             <button style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 4px;opacity:.7;" data-deletar-materia="${mi}" title="Excluir disciplina">🗑️</button>
+             <button class="bussola-btn-acao" data-editar-materia="${mi}" title="Renomear disciplina">✏️</button>
+             <button class="bussola-btn-acao" data-deletar-materia="${mi}" title="Excluir disciplina">🗑️</button>
            </div>`;
 
       return `
@@ -927,8 +927,8 @@ function renderEditalDetalhe(view, idStr) {
                      </div>`
                   : `<div style="font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
                        <span>${escapeHtml(t.nome)}</span>
-                       <button style="background:none;border:none;cursor:pointer;font-size:11px;padding:1px 3px;opacity:.65;" data-editar-topico="${mi}:${ti}" title="Renomear tópico">✏️</button>
-                       <button style="background:none;border:none;cursor:pointer;font-size:11px;padding:1px 3px;opacity:.65;" data-deletar-topico="${mi}:${ti}" title="Excluir tópico">🗑️</button>
+                       <button class="bussola-btn-acao" data-editar-topico="${mi}:${ti}" title="Renomear tópico">✏️</button>
+                       <button class="bussola-btn-acao" data-deletar-topico="${mi}:${ti}" title="Excluir tópico">🗑️</button>
                      </div>`;
 
                 return `

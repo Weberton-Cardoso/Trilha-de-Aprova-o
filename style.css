@@ -1093,6 +1093,18 @@ tr.row-motivo td{ padding-top:0; padding-bottom:8px; border-top:none; }
 }
 
 /* ---- Vínculo Edital ↔ Ciclo ---- */
+/* Botões de editar/deletar matéria e tópico — área de toque maior no mobile */
+.bussola-btn-acao {
+  background: none; border: none; cursor: pointer;
+  font-size: 13px; padding: 4px 6px; opacity: .65;
+  border-radius: 4px; line-height: 1;
+  position: relative; z-index: 1;
+}
+.bussola-btn-acao:hover { opacity: 1; background: var(--surface-2); }
+@media(max-width:640px){
+  .bussola-btn-acao { font-size: 15px; padding: 6px 8px; }
+}
+
 .bussola-ciclo-vinculo {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 11.5px; padding: 2px 8px; border-radius: 999px;
