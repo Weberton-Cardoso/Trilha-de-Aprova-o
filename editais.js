@@ -1464,3 +1464,96 @@ function renderKanbanCard(t, mi, ti, stats) {
     </div>
   `;
 }
+
+/* ============================================================
+   LISTA DE EDITAIS — substitui qualquer renderEditais anterior.
+   Adiciona o botão "Criar edital em branco" além do "Importar".
+   ============================================================ */
+function renderEditais(view) {
+  const editais = state.editais || [];
+
+  view.innerHTML = `
+    <p style="color:var(--text-muted);margin-bottom:20px;">
+      Importe o edital automaticamente e acompanhe o progresso por disciplina e tópico.
+    </p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:28px;">
+      <a href="#/editais/importar" class="btn btn-primary">+ Importar edital</a>
+      <button class="btn btn-secondary" id="btn-criar-edital-branco">+ Criar edital em branco</button>
+    </div>
+
+    ${editais.length === 0
+      ? `<div class="empty-state">
+           <p>Nenhum edital cadastrado ainda.</p>
+           <p class="text-muted" style="font-size:13px;">
+             Crie um edital em branco e adicione suas disciplinas a partir das tentativas,
+             ou importe o PDF/texto do edital oficial.
+           </p>
+         </div>`
+      : `<div style="display:flex;flex-direction:column;gap:12px;">
+           ${editais.map(e => {
+             let totalTopicos = 0, cobertos = 0;
+             (e.materias || []).forEach(m => {
+               (m.topicos || []).forEach(t => {
+                 totalTopicos++;
+                 if (calcStatusEfetivoTopico(t, m.nome).coberto) cobertos++;
+               });
+             });
+             const pct = totalTopicos ? Math.round((cobertos / totalTopicos) * 100) : 0;
+             return `
+               <a href="#/editais/${e.id}" class="card" style="display:block;text-decoration:none;color:inherit;">
+                 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                   <div>
+                     <div style="font-size:16px;font-weight:700;font-family:var(--font-display);">
+                       ${escapeHtml(e.nome)}
+                     </div>
+                     <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">
+                       ${(e.materias || []).length} disciplinas · ${totalTopicos} tópicos
+                     </div>
+                   </div>
+                   <div style="text-align:right;flex-shrink:0;">
+                     <div style="font-size:20px;font-weight:700;color:var(--gold);">${pct}%</div>
+                     <div style="font-size:11px;color:var(--text-muted);">coberto</div>
+                   </div>
+                 </div>
+                 <div style="margin-top:10px;height:5px;border-radius:3px;background:var(--surface-3,#2a2a2a);">
+                   <div style="width:${pct}%;height:100%;border-radius:3px;background:var(--success);transition:width .3s;"></div>
+                 </div>
+               </a>`;
+           }).join('')}
+         </div>`
+    }
+  `;
+
+  $('#btn-criar-edital-branco')?.addEventListener('click', async () => {
+    openModal(`
+      <h3 style="margin:0 0 16px;font-family:var(--font-display);">Criar edital em branco</h3>
+      <label class="form-label">Nome do edital</label>
+      <input id="novo-edital-nome" class="form-input" placeholder="Ex: TCDF 2026" style="margin-bottom:8px;" />
+      <label class="form-label">Concurso (opcional)</label>
+      <input id="novo-edital-concurso" class="form-input" placeholder="Ex: TCDF" style="margin-bottom:16px;" />
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-ghost" id="btn-cancelar-novo-edital">Cancelar</button>
+        <button class="btn btn-primary" id="btn-confirmar-novo-edital">Criar</button>
+      </div>
+    `);
+
+    $('#btn-cancelar-novo-edital')?.addEventListener('click', closeModal);
+
+    $('#btn-confirmar-novo-edital')?.addEventListener('click', async () => {
+      const nome = $('#novo-edital-nome')?.value.trim();
+      if (!nome) { showToast('Digite o nome do edital.', 'error'); return; }
+      const concurso = $('#novo-edital-concurso')?.value.trim();
+      await db.editais.add({ nome, concurso: concurso || null, ativo: true, materias: [] });
+      await reloadState();
+      closeModal();
+      showToast(`Edital "${nome}" criado! Agora adicione as disciplinas. ✓`, 'success');
+      // Redireciona para o novo edital
+      const novo = state.editais.find(e => e.nome === nome);
+      if (novo) location.hash = `#/editais/${novo.id}`;
+    });
+
+    $('#novo-edital-nome')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') $('#btn-confirmar-novo-edital')?.click();
+    });
+  });
+}
