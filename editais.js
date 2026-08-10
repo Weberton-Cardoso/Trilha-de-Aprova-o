@@ -664,26 +664,22 @@ function initDashboardEditalChart() {
 function calcStatusAutomaticoTopico(nomeTopico, nomeDisciplina) {
   const hoje = new Date().toISOString().slice(0, 10);
 
-  // 1) Tentativas por assunto — match exato normalizado
+  // Match direto por disciplina + assunto (mesmos nomes que você usa nas tentativas)
   const porAssunto = state.tentativas.filter(t =>
+    _norm(t.disciplina) === _norm(nomeDisciplina) &&
     t.assunto && _norm(t.assunto) === _norm(nomeTopico)
   );
 
-  // 2) Fallback: tentativas por disciplina (match exato ou por sigla/similaridade)
-  //    Usado quando o assunto não bate com nenhum tópico — distribui os dados
-  //    da disciplina proporcionalmente entre os tópicos sem match de assunto.
+  // Fallback: todas as tentativas da disciplina (quando tópico = disciplina sem assunto)
   const porDisciplina = nomeDisciplina
-    ? state.tentativas.filter(t => {
-        if (_norm(t.disciplina) === _norm(nomeDisciplina)) return true;
-        // aceita sigla: "AFO" bate com "Administração Financeira e Orçamentária"
-        if (_calcScoreSimilaridade(t.disciplina || '', nomeDisciplina) >= 0.8) return true;
-        return false;
-      })
+    ? state.tentativas.filter(t => _norm(t.disciplina) === _norm(nomeDisciplina))
     : [];
 
-  // Prioridade: assunto exato > disciplina (só quando assunto está vazio na tentativa)
-  const tentativasSemAssunto = porDisciplina.filter(t => !t.assunto || t.assunto.trim() === '');
-  const lista = porAssunto.length ? porAssunto : tentativasSemAssunto;
+  // Se o tópico tem o mesmo nome da disciplina → usa todas as tentativas da disciplina
+  const topicoEhDisciplina = _norm(nomeTopico) === _norm(nomeDisciplina);
+  const lista = topicoEhDisciplina
+    ? porDisciplina
+    : (porAssunto.length ? porAssunto : []);
 
   if (!lista.length) {
     return { status: 'nao_visto', taxa: null, dias: null, tentativas: 0, questoes: 0, coberto: false };
@@ -716,30 +712,23 @@ function calcStatusEfetivoTopico(t, nomeDisciplina) {
   return calcStatusAutomaticoTopico(t.nome, nomeDisciplina);
 }
 
-/** Calcula o status automático de toda uma disciplina (agregado de tópicos).
- *  Se nenhum tópico tem tentativa por assunto, usa as tentativas da disciplina
- *  como um todo (campo disciplina das tentativas) para mostrar taxa média. */
+/** Calcula o status da disciplina agregando tentativas por nome de disciplina. */
 function calcStatusDisciplina(materia) {
+  // Todas as tentativas dessa disciplina (match exato pelo nome)
+  const tentDisc = state.tentativas.filter(t =>
+    _norm(t.disciplina) === _norm(materia.nome)
+  );
+
   const topicosComDados = (materia.topicos || []).map(t =>
     calcStatusEfetivoTopico(t, materia.nome)
   );
-  const comTentativa = topicosComDados.filter(s => s.tentativas > 0);
+  const coberto = topicosComDados.filter(s => s.coberto).length;
+  const total   = topicosComDados.length;
 
-  // Fallback: tentativas da disciplina como um todo (sem assunto específico)
-  if (!comTentativa.length) {
-    const tentDisc = state.tentativas.filter(t =>
-      _norm(t.disciplina) === _norm(materia.nome) ||
-      _calcScoreSimilaridade(t.disciplina || '', materia.nome) >= 0.8
-    );
-    if (!tentDisc.length) return { taxa: null, coberto: 0, total: topicosComDados.length };
-    const r = calcResumo(tentDisc);
-    const coberto = topicosComDados.filter(s => s.coberto).length;
-    return { taxa: r.taxa, coberto, total: topicosComDados.length };
-  }
+  if (!tentDisc.length) return { taxa: null, coberto, total };
 
-  const taxaMedia = comTentativa.reduce((s, x) => s + x.taxa, 0) / comTentativa.length;
-  const coberto   = topicosComDados.filter(s => s.coberto).length;
-  return { taxa: taxaMedia, coberto, total: topicosComDados.length };
+  const r = calcResumo(tentDisc);
+  return { taxa: r.taxa, coberto, total };
 }
 
 const _STATUS_BUSSOLA = {
@@ -827,7 +816,10 @@ function renderEditalDetalhe(view, idStr) {
     </div>
 
     <!-- Ações da lista -->
-    <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+      <button class="btn btn-ghost btn-sm" id="btn-bussola-sync" title="Adiciona automaticamente tópicos novos a partir dos assuntos das suas tentativas">
+        🔄 Sincronizar tópicos
+      </button>
       <button class="btn btn-secondary btn-sm" id="btn-bussola-add-disciplina">+ Adicionar disciplina</button>
     </div>
 
@@ -835,18 +827,114 @@ function renderEditalDetalhe(view, idStr) {
     <div id="bussola-lista"></div>
   `;
 
-  $('#btn-bussola-add-disciplina')?.addEventListener('click', async () => {
-    const nome = prompt('Nome da nova disciplina:');
-    if (!nome || !nome.trim()) return;
+  $('#btn-bussola-add-disciplina')?.addEventListener('click', () => {
+    // Disciplinas que o usuário já usa nas tentativas mas ainda não estão no edital
+    const nomesNoEdital = new Set((edital.materias || []).map(m => _norm(m.nome)));
+    const disciplinasDisponiveis = [...new Set(
+      state.tentativas.map(t => t.disciplina).filter(Boolean)
+    )].filter(d => !nomesNoEdital.has(_norm(d))).sort();
+
+    // Monta modal com lista de disciplinas reais + opção de nome livre
+    const itens = disciplinasDisponiveis.map(d => `
+      <button class="btn btn-ghost btn-sm" style="text-align:left;width:100%;padding:10px 14px;
+        border:1px solid var(--border);border-radius:8px;margin-bottom:6px;font-size:14px;"
+        data-add-disc="${escapeHtml(d)}">
+        ${escapeHtml(d)}
+        <span style="font-size:11px;color:var(--text-muted);margin-left:6px;">
+          ${state.tentativas.filter(t => _norm(t.disciplina) === _norm(d)).length} tentativas
+        </span>
+      </button>`).join('');
+
+    openModal(`
+      <h3 style="margin:0 0 16px;font-family:var(--font-display);">Adicionar disciplina</h3>
+      ${disciplinasDisponiveis.length ? `
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+          Suas disciplinas das tentativas — clique para adicionar:
+        </p>
+        <div style="max-height:300px;overflow-y:auto;">${itens}</div>
+        <div style="margin:16px 0;border-top:1px solid var(--border);padding-top:14px;">
+      ` : ''}
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">Ou adicione manualmente:</p>
+      <div style="display:flex;gap:8px;">
+        <input id="add-disc-input" class="form-input" placeholder="Nome da disciplina" style="flex:1;" />
+        <button class="btn btn-primary" id="add-disc-confirmar">Adicionar</button>
+      </div>
+      ${disciplinasDisponiveis.length ? '</div>' : ''}
+    `);
+
+    // Click nas disciplinas já usadas nas tentativas
+    $$('[data-add-disc]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const nome = btn.dataset.addDisc;
+        await _adicionarDisciplinaComTopicos(nome);
+        closeModal();
+      });
+    });
+
+    // Adicionar manualmente
+    $('#add-disc-confirmar')?.addEventListener('click', async () => {
+      const nome = $('#add-disc-input')?.value.trim();
+      if (!nome) return;
+      await _adicionarDisciplinaComTopicos(nome);
+      closeModal();
+    });
+    $('#add-disc-input')?.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        const nome = e.target.value.trim();
+        if (!nome) return;
+        await _adicionarDisciplinaComTopicos(nome);
+        closeModal();
+      }
+    });
+  });
+
+  /** Adiciona disciplina ao edital e popula automaticamente os tópicos
+   *  a partir dos assuntos registrados nas tentativas dessa disciplina. */
+  async function _adicionarDisciplinaComTopicos(nome) {
     edital.materias = edital.materias || [];
-    if (edital.materias.some(m => _norm(m.nome) === _norm(nome.trim()))) {
-      showToast('Já existe uma disciplina com esse nome neste edital.', 'error');
+    if (edital.materias.some(m => _norm(m.nome) === _norm(nome))) {
+      showToast('Esta disciplina já está no edital.', 'error');
       return;
     }
-    edital.materias.push({ nome: nome.trim(), topicos: [] });
+
+    // Popula tópicos a partir dos assuntos únicos das tentativas
+    const assuntos = [...new Set(
+      state.tentativas
+        .filter(t => _norm(t.disciplina) === _norm(nome) && t.assunto && t.assunto.trim())
+        .map(t => t.assunto.trim())
+    )].sort();
+
+    const topicos = assuntos.length
+      ? assuntos.map(a => ({ nome: a, status: null, statusManual: null }))
+      : [{ nome: nome, status: null, statusManual: null }]; // tópico-raiz com mesmo nome
+
+    edital.materias.push({ nome: nome.trim(), topicos });
     await db.editais.update(edital);
     await reloadState();
-    showToast('Disciplina adicionada! ✓', 'success');
+    showToast(`"${nome}" adicionada com ${topicos.length} tópico(s) ✓`, 'success');
+    desenharLista();
+  }
+
+  // Botão "Sincronizar todas as disciplinas" — atualiza tópicos com novos assuntos
+  $('#btn-bussola-sync')?.addEventListener('click', async () => {
+    edital.materias = edital.materias || [];
+    let novosTopicos = 0;
+    for (const m of edital.materias) {
+      const assuntos = [...new Set(
+        state.tentativas
+          .filter(t => _norm(t.disciplina) === _norm(m.nome) && t.assunto && t.assunto.trim())
+          .map(t => t.assunto.trim())
+      )];
+      for (const a of assuntos) {
+        if (!m.topicos.some(t => _norm(t.nome) === _norm(a))) {
+          m.topicos.push({ nome: a, status: null, statusManual: null });
+          novosTopicos++;
+        }
+      }
+    }
+    await db.editais.update(edital);
+    await reloadState();
+    showToast(novosTopicos > 0 ? `${novosTopicos} tópico(s) novo(s) adicionado(s) ✓` : 'Tudo já está sincronizado ✓', 'success');
     desenharLista();
   });
 
@@ -1309,7 +1397,11 @@ function _resolverMateriaCiclo(materiaEdital) {
     if (vinculada) return vinculada;
   }
 
-  // 2. Matching automático por score (threshold 0.4 — aceita siglas e abreviações)
+  // 2. Match exato por nome (mesmo nome usado nas tentativas e no ciclo)
+  const exato = cicloMaterias.find(m => _norm(m.nome) === _norm(materiaEdital.nome));
+  if (exato) return exato;
+
+  // 3. Matching por score (siglas, palavras-chave)
   let melhor = null, melhorScore = 0;
   for (const m of cicloMaterias) {
     const score = _calcScoreSimilaridade(materiaEdital.nome, m.nome);
