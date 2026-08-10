@@ -447,7 +447,13 @@ async function router() {
     } else {
       $('#page-title').textContent = PAGE_TITLES['editais'];
       updateActiveNav('editais');
-      renderEditais(view);
+      // renderEditais definida em editais.js
+      if (typeof renderEditais === 'function') {
+        renderEditais(view);
+      } else {
+        // Fallback inline caso editais.js ainda não tenha a função
+        _renderEditaisFallback(view);
+      }
     }
   } else if (base === 'simulados') {
     $('#page-title').textContent = PAGE_TITLES['simulados'];
@@ -2394,3 +2400,52 @@ window.addEventListener('DOMContentLoaded', async () => {
     navigator.serviceWorker.register('service-worker.js').catch(() => {});
   }
 });
+
+/** Fallback de renderEditais — usado enquanto o editais.js atualizado não chegou ao cliente. */
+function _renderEditaisFallback(view) {
+  const editais = state.editais || [];
+  view.innerHTML = `
+    <p style="color:var(--text-muted);margin-bottom:20px;">
+      Acompanhe o progresso por disciplina e tópico.
+    </p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:28px;">
+      <a href="#/editais/importar" class="btn btn-primary">+ Importar edital</a>
+      <button class="btn btn-secondary" id="btn-criar-edital-branco">+ Criar edital em branco</button>
+    </div>
+    ${editais.length === 0
+      ? '<div class="empty-state"><p>Nenhum edital cadastrado ainda.</p></div>'
+      : `<div style="display:flex;flex-direction:column;gap:12px;">
+           ${editais.map(e => `
+             <a href="#/editais/${e.id}" class="card" style="display:block;text-decoration:none;color:inherit;">
+               <div style="font-size:16px;font-weight:700;font-family:var(--font-display);">${escapeHtml(e.nome)}</div>
+               <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">
+                 ${(e.materias||[]).length} disciplinas
+               </div>
+             </a>`).join('')}
+         </div>`
+    }
+  `;
+
+  $('#btn-criar-edital-branco')?.addEventListener('click', async () => {
+    openModal(`
+      <h3 style="margin:0 0 16px;font-family:var(--font-display);">Criar edital em branco</h3>
+      <label class="form-label">Nome do edital</label>
+      <input id="novo-edital-nome" class="form-input" placeholder="Ex: TCDF 2026" style="margin-bottom:16px;" />
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-ghost" id="btn-cancelar-novo-edital">Cancelar</button>
+        <button class="btn btn-primary" id="btn-confirmar-novo-edital">Criar</button>
+      </div>
+    `);
+    $('#btn-cancelar-novo-edital')?.addEventListener('click', closeModal);
+    $('#btn-confirmar-novo-edital')?.addEventListener('click', async () => {
+      const nome = $('#novo-edital-nome')?.value.trim();
+      if (!nome) { showToast('Digite o nome do edital.', 'error'); return; }
+      await db.editais.add({ nome, ativo: true, materias: [] });
+      await reloadState();
+      closeModal();
+      showToast(`Edital "${nome}" criado! ✓`, 'success');
+      const novo = state.editais.find(e => e.nome === nome);
+      if (novo) location.hash = `#/editais/${novo.id}`;
+    });
+  });
+}
