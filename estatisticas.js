@@ -417,14 +417,42 @@ function renderConcursoDetalhe(view, nomeConcurso) {
 function renderEditais(view) {
   view.innerHTML = `
     <div class="toolbar">
-      <div class="text-muted">Importe o edital automaticamente e acompanhe o progresso por disciplina e tópico.</div>
-      <a class="btn btn-primary" href="#/editais/importar">
-        <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
-        Importar edital
-      </a>
+      <div class="text-muted">Acompanhe o progresso por disciplina e tópico.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-secondary" id="btn-criar-edital-branco">+ Criar em branco</button>
+        <a class="btn btn-primary" href="#/editais/importar">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
+          Importar edital
+        </a>
+      </div>
     </div>
     <div id="lista-editais"></div>
   `;
+
+  $('#btn-criar-edital-branco')?.addEventListener('click', async () => {
+    openModal(`
+      <h3 style="margin:0 0 16px;font-family:var(--font-display);">Criar edital em branco</h3>
+      <label class="form-label">Nome do edital</label>
+      <input id="novo-edital-nome" class="form-input" placeholder="Ex: TCDF 2026" style="margin-bottom:16px;" />
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-ghost" id="btn-cancelar-novo-edital">Cancelar</button>
+        <button class="btn btn-primary" id="btn-confirmar-novo-edital">Criar</button>
+      </div>
+    `);
+    $('#btn-cancelar-novo-edital')?.addEventListener('click', closeModal);
+    const confirmar = async () => {
+      const nome = $('#novo-edital-nome')?.value.trim();
+      if (!nome) { showToast('Digite o nome do edital.', 'error'); return; }
+      await db.editais.add({ nome, ativo: true, materias: [] });
+      await reloadState();
+      closeModal();
+      showToast(`Edital "${nome}" criado! ✓`, 'success');
+      const novo = (state.editais || []).find(e => e.nome === nome);
+      if (novo) location.hash = `#/editais/${novo.id}`;
+    };
+    $('#btn-confirmar-novo-edital')?.addEventListener('click', confirmar);
+    $('#novo-edital-nome')?.addEventListener('keydown', e => { if (e.key === 'Enter') confirmar(); });
+  });
 
   renderListaEditais();
 
@@ -433,7 +461,7 @@ function renderEditais(view) {
     if (!state.editais.length) {
       wrap.innerHTML = `<div class="empty-state">
         <p>Nenhum edital cadastrado ainda.</p>
-        <a class="btn btn-primary" href="#/editais/importar">Importar edital</a>
+        <p class="text-muted" style="font-size:13px;">Crie um edital em branco e adicione suas disciplinas, ou importe o PDF do edital oficial.</p>
       </div>`;
       return;
     }
