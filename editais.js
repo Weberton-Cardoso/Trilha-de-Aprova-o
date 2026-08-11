@@ -1497,7 +1497,11 @@ function renderKanbanCard(t, mi, ti, stats) {
    LISTA DE EDITAIS — substitui qualquer renderEditais anterior.
    Adiciona o botão "Criar edital em branco" além do "Importar".
    ============================================================ */
-function renderEditais(view) {
+async function renderEditais(view) {
+  // Garante que o state está atualizado antes de calcular cobertura
+  // (evita mostrar % desatualizado se o sync ainda não terminou)
+  if (typeof reloadState === 'function') await reloadState();
+
   const editais = state.editais || [];
 
   // Calcula cobertura de cada edital usando calcStatusEfetivoTopico
