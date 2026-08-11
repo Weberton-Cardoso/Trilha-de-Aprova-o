@@ -476,7 +476,7 @@ function renderEditais(view) {
             <div class="pct-bar"><span style="width:${prog.pct.toFixed(1)}%"></span></div>
             <span class="num">${fmtPct(prog.pct)}</span>
           </div>
-          <div class="text-muted" style="font-size:13px;">${prog.dominado}/${prog.total} tópicos dominados</div>
+          <div class="text-muted" style="font-size:13px;">${prog.cobertos}/${prog.total} tópicos cobertos</div>
         </div>`;
       }).join('')}
     </div>`;

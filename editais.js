@@ -581,29 +581,38 @@ function calcTopicoStats(nomeTopico) {
    ============================================================ */
 
 function calcProgressoEdital(edital) {
-  let total = 0, naoIniciado = 0, emEstudo = 0, emRevisao = 0, dominado = 0;
+  let total = 0, naoIniciado = 0, emEstudo = 0, emRevisao = 0, dominado = 0, cobertos = 0;
   (edital.materias || []).forEach(m => {
     (m.topicos || []).forEach(t => {
       total++;
-      if (t.status === 'em_estudo') emEstudo++;
-      else if (t.status === 'em_revisao') emRevisao++;
-      else if (t.status === 'dominado') dominado++;
-      else naoIniciado++;
+      const s = calcStatusEfetivoTopico(t, m.nome);
+      if      (s.status === 'dominado') { dominado++; cobertos++; }
+      else if (s.status === 'bom')      { emRevisao++; cobertos++; }
+      else if (s.status === 'revisar')  { emEstudo++;  cobertos++; }
+      else if (s.status === 'critico')  { emEstudo++;  cobertos++; }
+      else                                naoIniciado++;
     });
   });
-  const pct = total ? (dominado / total) * 100 : 0;
-  return { total, naoIniciado, emEstudo, emRevisao, dominado, pct };
+  // pct = tópicos com ao menos 1 tentativa (cobertos) / total
+  const pct = total ? (cobertos / total) * 100 : 0;
+  return { total, naoIniciado, emEstudo, emRevisao, dominado, cobertos, pct };
 }
 
 function calcProgressoGeralEditais() {
-  let disciplinas = 0, total = 0, naoIniciado = 0, emEstudo = 0, emRevisao = 0, dominado = 0;
+  let disciplinas = 0, total = 0, naoIniciado = 0, emEstudo = 0, emRevisao = 0, dominado = 0, cobertos = 0;
   state.editais.forEach(e => {
     disciplinas += (e.materias || []).length;
     const p = calcProgressoEdital(e);
-    total += p.total; naoIniciado += p.naoIniciado; emEstudo += p.emEstudo; emRevisao += p.emRevisao; dominado += p.dominado;
+    total      += p.total;
+    naoIniciado+= p.naoIniciado;
+    emEstudo   += p.emEstudo;
+    emRevisao  += p.emRevisao;
+    dominado   += p.dominado;
+    cobertos   += p.cobertos;
   });
-  const pct = total ? (dominado / total) * 100 : 0;
-  return { disciplinas, total, naoIniciado, emEstudo, emRevisao, dominado, estudados: total - naoIniciado, pendentes: naoIniciado, pct };
+  const pct = total ? (cobertos / total) * 100 : 0;
+  return { disciplinas, total, naoIniciado, emEstudo, emRevisao, dominado, cobertos,
+           estudados: cobertos, pendentes: naoIniciado, pct };
 }
 
 /** HTML da seção "Progresso do Edital" a ser inserida no Dashboard (app.js chama isso). */
@@ -617,10 +626,10 @@ function buildDashboardEditalHTML() {
       <div class="stat-grid" style="margin-bottom:0;">
         <div class="stat-card"><div class="label">Disciplinas</div><div class="value">${p.disciplinas}</div></div>
         <div class="stat-card"><div class="label">Total de tópicos</div><div class="value">${p.total}</div></div>
-        <div class="stat-card info"><div class="label">Tópicos estudados</div><div class="value">${p.estudados}</div></div>
+        <div class="stat-card info"><div class="label">Tópicos cobertos</div><div class="value">${p.cobertos}</div></div>
         <div class="stat-card success"><div class="label">Tópicos dominados</div><div class="value">${p.dominado}</div></div>
-        <div class="stat-card danger"><div class="label">Tópicos pendentes</div><div class="value">${p.pendentes}</div></div>
-        <div class="stat-card gold"><div class="label">% concluído</div><div class="value">${fmtPct(p.pct)}</div></div>
+        <div class="stat-card danger"><div class="label">Não iniciados</div><div class="value">${p.pendentes}</div></div>
+        <div class="stat-card gold"><div class="label">% coberto</div><div class="value">${fmtPct(p.pct)}</div></div>
       </div>
       <div class="card">
         <div class="card-title">Status dos tópicos</div>
@@ -664,22 +673,37 @@ function initDashboardEditalChart() {
 function calcStatusAutomaticoTopico(nomeTopico, nomeDisciplina) {
   const hoje = new Date().toISOString().slice(0, 10);
 
-  // Match direto por disciplina + assunto (mesmos nomes que você usa nas tentativas)
-  const porAssunto = state.tentativas.filter(t =>
-    _norm(t.disciplina) === _norm(nomeDisciplina) &&
-    t.assunto && _norm(t.assunto) === _norm(nomeTopico)
-  );
+  // Tenta match da disciplina nas tentativas em 3 níveis:
+  // 1. Exato (normalizado)
+  // 2. Fuzzy via _calcScoreSimilaridade (resolve AFO vs Administração Financeira, etc.)
+  // 3. Fallback: tópico como sub-assunto dentro da disciplina
+  const norm = _norm;
 
-  // Fallback: todas as tentativas da disciplina (quando tópico = disciplina sem assunto)
-  const porDisciplina = nomeDisciplina
-    ? state.tentativas.filter(t => _norm(t.disciplina) === _norm(nomeDisciplina))
-    : [];
+  // Encontra tentativas da disciplina (match exato ou fuzzy ≥ 0.7)
+  const tentativasDaDisc = state.tentativas.filter(t => {
+    const nd = norm(t.disciplina);
+    if (!nd) return false;
+    if (nd === norm(nomeDisciplina)) return true;
+    return _calcScoreSimilaridade(t.disciplina, nomeDisciplina) >= 0.7;
+  });
 
-  // Se o tópico tem o mesmo nome da disciplina → usa todas as tentativas da disciplina
-  const topicoEhDisciplina = _norm(nomeTopico) === _norm(nomeDisciplina);
-  const lista = topicoEhDisciplina
-    ? porDisciplina
-    : (porAssunto.length ? porAssunto : []);
+  // Match do tópico: por assunto exato, ou tópico = disciplina (sem sub-tópicos)
+  const topicoEhDisciplina = norm(nomeTopico) === norm(nomeDisciplina)
+    || _calcScoreSimilaridade(nomeTopico, nomeDisciplina) >= 0.85;
+
+  let lista;
+  if (topicoEhDisciplina) {
+    lista = tentativasDaDisc;
+  } else {
+    // Tenta match por assunto (exato ou fuzzy)
+    const porAssunto = tentativasDaDisc.filter(t =>
+      t.assunto && (norm(t.assunto) === norm(nomeTopico)
+        || _calcScoreSimilaridade(t.assunto, nomeTopico) >= 0.7)
+    );
+    // Se não achou por assunto, usa todas da disciplina como fallback
+    // (evita que tópicos sem assunto específico fiquem sempre como nao_visto)
+    lista = porAssunto.length ? porAssunto : (tentativasDaDisc.length ? tentativasDaDisc : []);
+  }
 
   if (!lista.length) {
     return { status: 'nao_visto', taxa: null, dias: null, tentativas: 0, questoes: 0, coberto: false };
@@ -704,12 +728,22 @@ function calcStatusAutomaticoTopico(nomeTopico, nomeDisciplina) {
   return { status, taxa, dias, tentativas: resumo.tentativas, questoes: resumo.total, coberto };
 }
 
-/** Status efetivo do tópico: statusManual prevalece sobre o cálculo automático. */
+/** Status efetivo do tópico: statusManual prevalece sobre o cálculo automático
+ *  para o LABEL/status visual, mas o campo `coberto` sempre usa os dados reais
+ *  de tentativas — assim a cobertura na lista e no detalhe ficam consistentes. */
 function calcStatusEfetivoTopico(t, nomeDisciplina) {
+  const automatico = calcStatusAutomaticoTopico(t.nome, nomeDisciplina);
   if (t.statusManual) {
-    return { status: t.statusManual, taxa: null, dias: null, tentativas: 0, questoes: 0, coberto: t.statusManual !== 'nao_visto' };
+    // statusManual define como o tópico aparece visualmente, mas coberto
+    // vem sempre do cálculo automático (taxa >= 50 ou statusManual != nao_visto
+    // quando não há tentativas ainda).
+    const coberto = automatico.questoes > 0
+      ? automatico.coberto
+      : t.statusManual !== 'nao_visto';
+    return { status: t.statusManual, taxa: automatico.taxa, dias: automatico.dias,
+             tentativas: automatico.tentativas, questoes: automatico.questoes, coberto };
   }
-  return calcStatusAutomaticoTopico(t.nome, nomeDisciplina);
+  return automatico;
 }
 
 /** Calcula o status da disciplina agregando tentativas por nome de disciplina. */
@@ -1472,6 +1506,23 @@ function renderKanbanCard(t, mi, ti, stats) {
 function renderEditais(view) {
   const editais = state.editais || [];
 
+  // Calcula cobertura de cada edital usando calcStatusEfetivoTopico
+  // (mesmo critério do detalhe — taxa ≥50% nas tentativas reais).
+  // Se tentativas ainda não carregaram (sync em andamento), mostra "—"
+  // e agenda re-render automático assim que o state mudar.
+  const temTentativas = state.tentativas && state.tentativas.length > 0;
+
+  function pctEdital(e) {
+    let total = 0, cobertos = 0;
+    (e.materias || []).forEach(m => {
+      (m.topicos || []).forEach(t => {
+        total++;
+        if (calcStatusEfetivoTopico(t, m.nome).coberto) cobertos++;
+      });
+    });
+    return { total, cobertos, pct: total ? Math.round((cobertos / total) * 100) : 0 };
+  }
+
   view.innerHTML = `
     <p style="color:var(--text-muted);margin-bottom:20px;">
       Importe o edital automaticamente e acompanhe o progresso por disciplina e tópico.
@@ -1490,15 +1541,9 @@ function renderEditais(view) {
            </p>
          </div>`
       : `<div style="display:flex;flex-direction:column;gap:12px;">
+           ${!temTentativas ? `<div class="card" style="font-size:13px;color:var(--text-muted);">⏳ Carregando tentativas — a cobertura será calculada em instantes...</div>` : ''}
            ${editais.map(e => {
-             let totalTopicos = 0, cobertos = 0;
-             (e.materias || []).forEach(m => {
-               (m.topicos || []).forEach(t => {
-                 totalTopicos++;
-                 if (calcStatusEfetivoTopico(t, m.nome).coberto) cobertos++;
-               });
-             });
-             const pct = totalTopicos ? Math.round((cobertos / totalTopicos) * 100) : 0;
+             const { total, cobertos, pct } = pctEdital(e);
              return `
                <a href="#/editais/${e.id}" class="card" style="display:block;text-decoration:none;color:inherit;">
                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
@@ -1507,16 +1552,16 @@ function renderEditais(view) {
                        ${escapeHtml(e.nome)}
                      </div>
                      <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">
-                       ${(e.materias || []).length} disciplinas · ${totalTopicos} tópicos
+                       ${(e.materias || []).length} disciplinas · ${total} tópicos
                      </div>
                    </div>
                    <div style="text-align:right;flex-shrink:0;">
-                     <div style="font-size:20px;font-weight:700;color:var(--gold);">${pct}%</div>
-                     <div style="font-size:11px;color:var(--text-muted);">coberto</div>
+                     <div style="font-size:20px;font-weight:700;color:var(--gold);">${temTentativas ? pct + '%' : '—'}</div>
+                     <div style="font-size:11px;color:var(--text-muted);">${cobertos} de ${total} cobertos</div>
                    </div>
                  </div>
                  <div style="margin-top:10px;height:5px;border-radius:3px;background:var(--surface-3,#2a2a2a);">
-                   <div style="width:${pct}%;height:100%;border-radius:3px;background:var(--success);transition:width .3s;"></div>
+                   <div style="width:${temTentativas ? pct : 0}%;height:100%;border-radius:3px;background:var(--success);transition:width .3s;"></div>
                  </div>
                </a>`;
            }).join('')}

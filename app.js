@@ -356,6 +356,7 @@ const PAGE_TITLES = {
   'revisao': 'Revisão do Dia',
   'evolucao-revisao': 'Evolução da Revisão',
   'diagnostico': 'Diagnóstico de Erros',
+  'mentor': 'Mentor IA',
   'estatisticas/disciplinas': 'Estatísticas por Disciplina',
   'estatisticas/assuntos': 'Estatísticas por Assunto',
   'estatisticas/bancas': 'Estatísticas por Banca',
@@ -447,13 +448,7 @@ async function router() {
     } else {
       $('#page-title').textContent = PAGE_TITLES['editais'];
       updateActiveNav('editais');
-      // renderEditais definida em editais.js
-      if (typeof renderEditais === 'function') {
-        renderEditais(view);
-      } else {
-        // Fallback inline caso editais.js ainda não tenha a função
-        _renderEditaisFallback(view);
-      }
+      renderEditais(view);
     }
   } else if (base === 'simulados') {
     $('#page-title').textContent = PAGE_TITLES['simulados'];
@@ -475,6 +470,10 @@ async function router() {
     $('#page-title').textContent = PAGE_TITLES['evolucao-revisao'];
     updateActiveNav('revisao');
     if (typeof renderEvolucaoRevisao === 'function') renderEvolucaoRevisao(view);
+  } else if (base === 'mentor') {
+    $('#page-title').textContent = PAGE_TITLES['mentor'];
+    updateActiveNav('mentor');
+    if (typeof renderMentorIA === 'function') renderMentorIA(view);
   } else if (base === 'diagnostico') {
     $('#page-title').textContent = PAGE_TITLES['diagnostico'];
     updateActiveNav('diagnostico');
@@ -745,6 +744,8 @@ function renderDashboard(view) {
       <div class="stat-card info"><div class="label">Tempo esta semana</div><div class="value">${_formatarMinutos(minutosSemanaCiclo)}</div></div>
     </div>
 
+    <div class="card mb-12" id="card-mentor-dashboard"></div>
+
     <div class="card mb-12" id="card-recomendacao-dia"></div>
 
     <div class="card mb-12" id="card-relatorio-diario"></div>
@@ -838,6 +839,9 @@ function renderDashboard(view) {
   try { initDashboardEditalChart(); } catch (err) { console.error('Erro em initDashboardEditalChart:', err); }
   try { renderStatsPorDisciplina(); } catch (err) { console.error('Erro em renderStatsPorDisciplina:', err); }
   try { renderTempoPorTipoCicloDashboard(); } catch (err) { console.error('Erro em renderTempoPorTipoCicloDashboard:', err); }
+  try {
+    if (typeof renderCardMentorDashboard === 'function') renderCardMentorDashboard().catch(err => console.error('Erro em renderCardMentorDashboard:', err));
+  } catch (err) { console.error('Erro em renderCardMentorDashboard:', err); }
   try {
     if (typeof renderCardRecomendacaoDia === 'function') renderCardRecomendacaoDia().catch(err => console.error('Erro em renderCardRecomendacaoDia:', err));
   } catch (err) { console.error('Erro em renderCardRecomendacaoDia:', err); }
@@ -1225,7 +1229,25 @@ function renderPrioridadeRevisao() {
 
   const norm = (s) => (s || '').trim().toLowerCase();
   const hoje = todayISO();
-  const materias = state.cicloMaterias || [];
+
+  // Só mostra matérias de ciclos que têm edital ativo com o mesmo nome,
+  // OU (fallback) do ciclo com mais sessões nos últimos 60 dias.
+  const editaisAtivos = (state.editais || []).filter(e => e.ativo !== false);
+  const nomesEditaisAtivos = new Set(editaisAtivos.map(e => norm(e.nome)));
+  const nomesConursosAtivos = new Set(editaisAtivos.map(e => norm(e.concurso || e.nome)));
+
+  // Ciclos com edital ativo correspondente (por nome do ciclo = nome/concurso do edital)
+  const ciclosComEdital = (state.ciclos || []).filter(c =>
+    nomesEditaisAtivos.has(norm(c.nome)) || nomesConursosAtivos.has(norm(c.nome))
+  );
+  const idsCiclosAtivos = new Set(ciclosComEdital.map(c => c.id));
+
+  // Fallback: se nenhum ciclo casar com edital, usa todos (comportamento anterior)
+  const usarTodos = idsCiclosAtivos.size === 0;
+
+  const materias = (state.cicloMaterias || []).filter(m =>
+    usarTodos || idsCiclosAtivos.has(m.cicloId)
+  );
 
   if (!materias.length) {
     card.innerHTML = `
@@ -2400,52 +2422,3 @@ window.addEventListener('DOMContentLoaded', async () => {
     navigator.serviceWorker.register('service-worker.js').catch(() => {});
   }
 });
-
-/** Fallback de renderEditais — usado enquanto o editais.js atualizado não chegou ao cliente. */
-function _renderEditaisFallback(view) {
-  const editais = state.editais || [];
-  view.innerHTML = `
-    <p style="color:var(--text-muted);margin-bottom:20px;">
-      Acompanhe o progresso por disciplina e tópico.
-    </p>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:28px;">
-      <a href="#/editais/importar" class="btn btn-primary">+ Importar edital</a>
-      <button class="btn btn-secondary" id="btn-criar-edital-branco">+ Criar edital em branco</button>
-    </div>
-    ${editais.length === 0
-      ? '<div class="empty-state"><p>Nenhum edital cadastrado ainda.</p></div>'
-      : `<div style="display:flex;flex-direction:column;gap:12px;">
-           ${editais.map(e => `
-             <a href="#/editais/${e.id}" class="card" style="display:block;text-decoration:none;color:inherit;">
-               <div style="font-size:16px;font-weight:700;font-family:var(--font-display);">${escapeHtml(e.nome)}</div>
-               <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">
-                 ${(e.materias||[]).length} disciplinas
-               </div>
-             </a>`).join('')}
-         </div>`
-    }
-  `;
-
-  $('#btn-criar-edital-branco')?.addEventListener('click', async () => {
-    openModal(`
-      <h3 style="margin:0 0 16px;font-family:var(--font-display);">Criar edital em branco</h3>
-      <label class="form-label">Nome do edital</label>
-      <input id="novo-edital-nome" class="form-input" placeholder="Ex: TCDF 2026" style="margin-bottom:16px;" />
-      <div style="display:flex;gap:8px;justify-content:flex-end;">
-        <button class="btn btn-ghost" id="btn-cancelar-novo-edital">Cancelar</button>
-        <button class="btn btn-primary" id="btn-confirmar-novo-edital">Criar</button>
-      </div>
-    `);
-    $('#btn-cancelar-novo-edital')?.addEventListener('click', closeModal);
-    $('#btn-confirmar-novo-edital')?.addEventListener('click', async () => {
-      const nome = $('#novo-edital-nome')?.value.trim();
-      if (!nome) { showToast('Digite o nome do edital.', 'error'); return; }
-      await db.editais.add({ nome, ativo: true, materias: [] });
-      await reloadState();
-      closeModal();
-      showToast(`Edital "${nome}" criado! ✓`, 'success');
-      const novo = state.editais.find(e => e.nome === nome);
-      if (novo) location.hash = `#/editais/${novo.id}`;
-    });
-  });
-}
