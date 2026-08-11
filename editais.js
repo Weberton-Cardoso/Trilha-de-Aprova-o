@@ -667,22 +667,37 @@ function initDashboardEditalChart() {
 function calcStatusAutomaticoTopico(nomeTopico, nomeDisciplina) {
   const hoje = new Date().toISOString().slice(0, 10);
 
-  // Match direto por disciplina + assunto (mesmos nomes que você usa nas tentativas)
-  const porAssunto = state.tentativas.filter(t =>
-    _norm(t.disciplina) === _norm(nomeDisciplina) &&
-    t.assunto && _norm(t.assunto) === _norm(nomeTopico)
-  );
+  // Tenta match da disciplina nas tentativas em 3 níveis:
+  // 1. Exato (normalizado)
+  // 2. Fuzzy via _calcScoreSimilaridade (resolve AFO vs Administração Financeira, etc.)
+  // 3. Fallback: tópico como sub-assunto dentro da disciplina
+  const norm = _norm;
 
-  // Fallback: todas as tentativas da disciplina (quando tópico = disciplina sem assunto)
-  const porDisciplina = nomeDisciplina
-    ? state.tentativas.filter(t => _norm(t.disciplina) === _norm(nomeDisciplina))
-    : [];
+  // Encontra tentativas da disciplina (match exato ou fuzzy ≥ 0.7)
+  const tentativasDaDisc = state.tentativas.filter(t => {
+    const nd = norm(t.disciplina);
+    if (!nd) return false;
+    if (nd === norm(nomeDisciplina)) return true;
+    return _calcScoreSimilaridade(t.disciplina, nomeDisciplina) >= 0.7;
+  });
 
-  // Se o tópico tem o mesmo nome da disciplina → usa todas as tentativas da disciplina
-  const topicoEhDisciplina = _norm(nomeTopico) === _norm(nomeDisciplina);
-  const lista = topicoEhDisciplina
-    ? porDisciplina
-    : (porAssunto.length ? porAssunto : []);
+  // Match do tópico: por assunto exato, ou tópico = disciplina (sem sub-tópicos)
+  const topicoEhDisciplina = norm(nomeTopico) === norm(nomeDisciplina)
+    || _calcScoreSimilaridade(nomeTopico, nomeDisciplina) >= 0.85;
+
+  let lista;
+  if (topicoEhDisciplina) {
+    lista = tentativasDaDisc;
+  } else {
+    // Tenta match por assunto (exato ou fuzzy)
+    const porAssunto = tentativasDaDisc.filter(t =>
+      t.assunto && (norm(t.assunto) === norm(nomeTopico)
+        || _calcScoreSimilaridade(t.assunto, nomeTopico) >= 0.7)
+    );
+    // Se não achou por assunto, usa todas da disciplina como fallback
+    // (evita que tópicos sem assunto específico fiquem sempre como nao_visto)
+    lista = porAssunto.length ? porAssunto : (tentativasDaDisc.length ? tentativasDaDisc : []);
+  }
 
   if (!lista.length) {
     return { status: 'nao_visto', taxa: null, dias: null, tentativas: 0, questoes: 0, coberto: false };
