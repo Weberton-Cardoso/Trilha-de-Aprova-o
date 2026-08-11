@@ -1485,6 +1485,23 @@ function renderKanbanCard(t, mi, ti, stats) {
 function renderEditais(view) {
   const editais = state.editais || [];
 
+  // Calcula cobertura de cada edital usando calcStatusEfetivoTopico
+  // (mesmo critério do detalhe — taxa ≥50% nas tentativas reais).
+  // Se tentativas ainda não carregaram (sync em andamento), mostra "—"
+  // e agenda re-render automático assim que o state mudar.
+  const temTentativas = state.tentativas && state.tentativas.length > 0;
+
+  function pctEdital(e) {
+    let total = 0, cobertos = 0;
+    (e.materias || []).forEach(m => {
+      (m.topicos || []).forEach(t => {
+        total++;
+        if (calcStatusEfetivoTopico(t, m.nome).coberto) cobertos++;
+      });
+    });
+    return { total, cobertos, pct: total ? Math.round((cobertos / total) * 100) : 0 };
+  }
+
   view.innerHTML = `
     <p style="color:var(--text-muted);margin-bottom:20px;">
       Importe o edital automaticamente e acompanhe o progresso por disciplina e tópico.
@@ -1503,15 +1520,9 @@ function renderEditais(view) {
            </p>
          </div>`
       : `<div style="display:flex;flex-direction:column;gap:12px;">
+           ${!temTentativas ? `<div class="card" style="font-size:13px;color:var(--text-muted);">⏳ Carregando tentativas — a cobertura será calculada em instantes...</div>` : ''}
            ${editais.map(e => {
-             let totalTopicos = 0, cobertos = 0;
-             (e.materias || []).forEach(m => {
-               (m.topicos || []).forEach(t => {
-                 totalTopicos++;
-                 if (calcStatusEfetivoTopico(t, m.nome).coberto) cobertos++;
-               });
-             });
-             const pct = totalTopicos ? Math.round((cobertos / totalTopicos) * 100) : 0;
+             const { total, cobertos, pct } = pctEdital(e);
              return `
                <a href="#/editais/${e.id}" class="card" style="display:block;text-decoration:none;color:inherit;">
                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
@@ -1520,16 +1531,16 @@ function renderEditais(view) {
                        ${escapeHtml(e.nome)}
                      </div>
                      <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">
-                       ${(e.materias || []).length} disciplinas · ${totalTopicos} tópicos
+                       ${(e.materias || []).length} disciplinas · ${total} tópicos
                      </div>
                    </div>
                    <div style="text-align:right;flex-shrink:0;">
-                     <div style="font-size:20px;font-weight:700;color:var(--gold);">${pct}%</div>
-                     <div style="font-size:11px;color:var(--text-muted);">coberto</div>
+                     <div style="font-size:20px;font-weight:700;color:var(--gold);">${temTentativas ? pct + '%' : '—'}</div>
+                     <div style="font-size:11px;color:var(--text-muted);">${cobertos} de ${total} cobertos</div>
                    </div>
                  </div>
                  <div style="margin-top:10px;height:5px;border-radius:3px;background:var(--surface-3,#2a2a2a);">
-                   <div style="width:${pct}%;height:100%;border-radius:3px;background:var(--success);transition:width .3s;"></div>
+                   <div style="width:${temTentativas ? pct : 0}%;height:100%;border-radius:3px;background:var(--success);transition:width .3s;"></div>
                  </div>
                </a>`;
            }).join('')}
