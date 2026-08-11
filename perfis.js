@@ -113,9 +113,6 @@ function renderPerfisPage(view) {
               ${ehAtivo ? `<span class="text-muted" style="font-size:12.5px;">
                 ${c.tentativas ?? 0} tentativa(s) · ${c.editais ?? 0} edital(is) · ${c.ciclos ?? 0} ciclo(s)
               </span>` : `<span class="text-muted" style="font-size:12.5px;">Selecione para ver os dados</span>`}
-              ${p.concurso ? `<div style="font-size:12px;color:var(--text-muted);margin-top:3px;">🎯 ${escapeHtml(p.concurso)}${p.cargo?' — '+escapeHtml(p.cargo):''}${p.banca?' · '+escapeHtml(p.banca):''}</div>` : ''}
-              ${p.dataProva ? (() => { const dias = Math.max(0,Math.round((new Date(p.dataProva+'T12:00:00')-Date.now())/86400000)); return `<div style="font-size:12px;color:var(--${dias<30?'danger':dias<90?'gold':'text-muted'});margin-top:2px;">📅 Prova em ${dias} dia${dias===1?'':'s'} (${p.dataProva})</div>`; })() : ''}
-              ${p.objetivoAcerto ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Meta: ${p.objetivoAcerto}% de acerto${p.horasDia?' · '+p.horasDia+'h/dia':''}</div>` : ''}
             </div>
           </div>
           <div class="perfil-card-acoes">
@@ -149,43 +146,12 @@ function renderPerfisPage(view) {
     btn.addEventListener('click', async () => {
       const perfil = state.perfis.find(p => p.id === Number(btn.dataset.editar));
       if (!perfil) return;
-      openModal(`
-        <h2>✏️ Editar perfil: ${escapeHtml(perfil.nome)}</h2>
-        <div class="form-row"><label>Nome do perfil</label><input type="text" id="pe-nome" value="${escapeHtml(perfil.nome||'')}"></div>
-        <div class="form-row"><label>Concurso principal</label><input type="text" id="pe-concurso" value="${escapeHtml(perfil.concurso||'')}" placeholder="Ex: TCDF, TCU, BACEN"></div>
-        <div class="form-row"><label>Cargo</label><input type="text" id="pe-cargo" value="${escapeHtml(perfil.cargo||'')}" placeholder="Ex: Auditor de Controle Externo"></div>
-        <div class="form-row"><label>Banca</label><input type="text" id="pe-banca" value="${escapeHtml(perfil.banca||'')}" placeholder="Ex: CESPE, FCC, FGV"></div>
-        <div class="form-row"><label>Data da prova</label><input type="date" id="pe-dataProva" value="${perfil.dataProva||''}"></div>
-        <div class="form-row" style="display:flex;gap:10px;">
-          <div style="flex:1;"><label>Horas disponíveis por dia</label><input type="number" id="pe-horasDia" value="${perfil.horasDia||''}" placeholder="Ex: 4" min="1" max="16" step="0.5"></div>
-          <div style="flex:1;"><label>Meta de acerto (%)</label><input type="number" id="pe-objetivoAcerto" value="${perfil.objetivoAcerto||''}" placeholder="Ex: 80" min="50" max="100"></div>
-        </div>
-        <div class="modal-actions">
-          <button class="btn btn-ghost" id="pe-cancelar">Cancelar</button>
-          <button class="btn btn-primary" id="pe-salvar">Salvar</button>
-        </div>
-      `);
-      $('#pe-cancelar').addEventListener('click', closeModal);
-      $('#pe-salvar').addEventListener('click', async () => {
-        const nome = $('#pe-nome').value.trim();
-        if (!nome) { showToast('Informe o nome do perfil.','danger'); return; }
-        await db.perfis.update({
-          ...perfil,
-          nome,
-          concurso:       $('#pe-concurso').value.trim()||null,
-          cargo:          $('#pe-cargo').value.trim()||null,
-          banca:          $('#pe-banca').value.trim()||null,
-          dataProva:      $('#pe-dataProva').value||null,
-          horasDia:       Number($('#pe-horasDia').value)||null,
-          objetivoAcerto: Number($('#pe-objetivoAcerto').value)||null
-        });
-        await reloadState();
-        closeModal();
-        renderPerfisPage(view);
-        atualizarSeletorPerfilUI();
-        if (typeof _invalidarCacheMentor === 'function') _invalidarCacheMentor();
-        showToast('Perfil atualizado.','success');
-      });
+      const novoNome = prompt('Novo nome do perfil:', perfil.nome);
+      if (!novoNome || !novoNome.trim() || novoNome.trim() === perfil.nome) return;
+      await db.perfis.update({ ...perfil, nome: novoNome.trim() });
+      await reloadState();
+      renderPerfisPage(view);
+      atualizarSeletorPerfilUI();
     });
   });
 

@@ -585,10 +585,13 @@ function calcProgressoEdital(edital) {
   (edital.materias || []).forEach(m => {
     (m.topicos || []).forEach(t => {
       total++;
-      if (t.status === 'em_estudo') emEstudo++;
-      else if (t.status === 'em_revisao') emRevisao++;
-      else if (t.status === 'dominado') dominado++;
-      else naoIniciado++;
+      // Usa status efetivo (calculado pelas tentativas reais) em vez do campo manual
+      const s = calcStatusEfetivoTopico(t, m.nome);
+      if      (s.status === 'dominado') dominado++;
+      else if (s.status === 'bom')      emRevisao++;   // bom → "em revisão" no gráfico
+      else if (s.status === 'revisar')  emEstudo++;    // revisar → "em estudo" no gráfico
+      else if (s.status === 'critico')  emEstudo++;    // crítico → "em estudo" no gráfico
+      else                              naoIniciado++; // nao_visto
     });
   });
   const pct = total ? (dominado / total) * 100 : 0;
