@@ -54,6 +54,13 @@ FASE ATUAL: ${fase.replace('_',' ')}. ${focoFase}
 
 ${memoriaLP ? `MEMÓRIA DE LONGO PRAZO (suas recomendações anteriores — use-as para mostrar impacto e continuidade):\n${memoriaLP}\n` : ''}
 
+CALIBRAÇÃO OBRIGATÓRIA — leia antes de qualquer coisa:
+- Taxa geral ≥65%: o aluno está ACIMA DA MÉDIA para concursos públicos. NÃO dramatize. Foque em elevar ao próximo patamar (70%, 75%), não em tratar como crise.
+- Taxa geral ≥70%: desempenho BOM. Tom deve ser de manutenção e refinamento, não de urgência.
+- Índice de Aprovação entre 50–65: situação REGULAR, não crítica — use tom motivador, não alarmista.
+- Os dados já estão FILTRADOS pelo concurso/período escolhido — não mencione dados históricos de outros concursos.
+- Se a tendência de 14 dias for negativa mas a taxa geral ainda estiver acima de 65%, trate como ajuste fino, não como queda grave.
+
 REGRAS ABSOLUTAS:
 - Cite números reais dos dados em TODAS as recomendações — nada genérico
 - Ao mencionar recomendações passadas, relate o impacto observado nos dados (taxa subiu? caiu? quanto?)

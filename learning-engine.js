@@ -171,22 +171,37 @@ function _calcCiclo(ciclos, cicloMaterias, cicloSessoes, tentativas, revisoes) {
    4. ÍNDICE DE APROVAÇÃO (0–100)
    ============================================================ */
 
-function _calcIndice({ questoes, tempo, ciclo, edital, simulados, diagnosticos }) {
-  const fase = questoes.total < 200 ? 'inicial' : questoes.total < 1000 ? 'rampup' : 'intensivo';
+function _calcIndice({ questoes, tempo, ciclo, edital, simulados, diagnosticos, fase }) {
+  // Fase passada de fora (calculada por _inferirFase) — evita recalcular
+  // com critério diferente e gerar inconsistência entre o índice e o label.
+  const faseIndice = fase || (questoes.total < 200 ? 'inicial' : questoes.total < 1000 ? 'rampup' : 'intensivo');
+
   const P = {
-    inicial:   { taxa:10, consistencia:30, cobertura:25, tempo:20, simulados:5,  diag:10 },
-    rampup:    { taxa:25, consistencia:20, cobertura:20, tempo:15, simulados:10, diag:10 },
+    inicial:   { taxa:15, consistencia:25, cobertura:20, tempo:25, simulados:5,  diag:10 },
+    rampup:    { taxa:30, consistencia:20, cobertura:15, tempo:15, simulados:10, diag:10 },
     intensivo: { taxa:35, consistencia:15, cobertura:15, tempo:10, simulados:20, diag:5  }
-  }[fase];
+  }[faseIndice] || { taxa:30, consistencia:20, cobertura:15, tempo:15, simulados:10, diag:10 };
+
+  // Taxa: usa taxa real filtrada (já vem de questoes calculadas com filtro)
+  const taxaScore      = Math.min(100, questoes.taxa ?? 50);
+  // Consistência: usa dados JÁ FILTRADOS (tempo calculado com cicloSessoes+tentativas filtradas)
+  const consistScore   = tempo.consistencia30;
+  const coberturaScore = edital.coberturaPercent ?? 50; // 50 como neutro se não tiver edital
+  // Tempo: meta de 60h/mês (30min/dia). min30 já é filtrado.
+  const tempoScore     = Math.min(100, (tempo.min30 / 60) * 2);
+  const simScore       = simulados.total > 0 ? Math.min(100, simulados.ultimaTaxa ?? 0) : taxaScore * 0.8;
+  // Diagnósticos: cada ativo tira 5pts (era 10 — muito punitivo)
+  const diagScore      = Math.max(0, 100 - diagnosticos.ativos * 5);
+
   const indice = Math.round(
-    Math.min(100, questoes.taxa??50) * P.taxa/100 +
-    tempo.consistencia30             * P.consistencia/100 +
-    (edital.coberturaPercent??0)     * P.cobertura/100 +
-    Math.min(100,(tempo.min30/30)*2) * P.tempo/100 +
-    (simulados.total>0 ? Math.min(100,simulados.ultimaTaxa??0) : 0) * P.simulados/100 +
-    Math.max(0,100-diagnosticos.ativos*10) * P.diag/100
+    taxaScore      * P.taxa          / 100 +
+    consistScore   * P.consistencia  / 100 +
+    coberturaScore * P.cobertura     / 100 +
+    tempoScore     * P.tempo         / 100 +
+    simScore       * P.simulados     / 100 +
+    diagScore      * P.diag          / 100
   );
-  return { indice: Math.min(100,Math.max(0,indice)), fase };
+  return { indice: Math.min(100, Math.max(0, indice)), fase: faseIndice };
 }
 
 /* ============================================================
@@ -539,13 +554,18 @@ function _calcLinhaDoTempo(tentativas, cicloSessoes, diario) {
 
 function _inferirFase(perfilEstrategico, questoes) {
   const dias = perfilEstrategico?.diasAteProva ?? null;
-  if (dias!=null) {
-    if (dias>180) return 'pre_edital';
-    if (dias>60)  return 'pos_edital';
-    return 'reta_final';
+
+  if (dias != null) {
+    if (dias > 180) return 'pre_edital';
+    if (dias > 45)  return 'pos_edital';
+    return 'reta_final'; // só reta final se faltar menos de 45 dias
   }
-  // Fallback: volume de questões
-  return questoes.total < 200 ? 'pre_edital' : questoes.total < 1000 ? 'pos_edital' : 'reta_final';
+
+  // Fallback por volume — thresholds mais generosos: 1000 questões ainda
+  // é rampup para quem tem histórico antigo importado de outra plataforma
+  return questoes.total < 300 ? 'pre_edital'
+       : questoes.total < 2000 ? 'pos_edital'
+       : 'reta_final';
 }
 
 /* ============================================================
@@ -669,12 +689,12 @@ function buildLearningProfile() {
   const resumosCalc  = { total:resumos.length, ultimaData:ultimoResumo?.data??null };
 
   // Indicadores
-  const indiceObj  = _calcIndice({questoes,tempo,ciclo,edital,simulados:simCalc,diagnosticos:diagCalc});
+  const fase       = _inferirFase(perfilEst, questoes);
+  const indiceObj  = _calcIndice({questoes,tempo,ciclo,edital,simulados:simCalc,diagnosticos:diagCalc,fase});
   const momentum   = _calcMomentum(tentativas, cicloSessoes);
   const sobrecarga = _calcSobrecarga(tentativas);
   const risco      = _calcRisco(tempo, questoes);
   const dna        = _calcDNA(tentativas, cicloSessoes, tempo, questoes);
-  const fase       = _inferirFase(perfilEst, questoes);
 
   // Diário + delta do índice
   const diario      = _lerDiario();
