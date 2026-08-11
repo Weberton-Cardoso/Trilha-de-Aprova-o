@@ -581,32 +581,38 @@ function calcTopicoStats(nomeTopico) {
    ============================================================ */
 
 function calcProgressoEdital(edital) {
-  let total = 0, naoIniciado = 0, emEstudo = 0, emRevisao = 0, dominado = 0;
+  let total = 0, naoIniciado = 0, emEstudo = 0, emRevisao = 0, dominado = 0, cobertos = 0;
   (edital.materias || []).forEach(m => {
     (m.topicos || []).forEach(t => {
       total++;
-      // Usa status efetivo (calculado pelas tentativas reais) em vez do campo manual
       const s = calcStatusEfetivoTopico(t, m.nome);
-      if      (s.status === 'dominado') dominado++;
-      else if (s.status === 'bom')      emRevisao++;   // bom → "em revisão" no gráfico
-      else if (s.status === 'revisar')  emEstudo++;    // revisar → "em estudo" no gráfico
-      else if (s.status === 'critico')  emEstudo++;    // crítico → "em estudo" no gráfico
-      else                              naoIniciado++; // nao_visto
+      if      (s.status === 'dominado') { dominado++; cobertos++; }
+      else if (s.status === 'bom')      { emRevisao++; cobertos++; }
+      else if (s.status === 'revisar')  { emEstudo++;  cobertos++; }
+      else if (s.status === 'critico')  { emEstudo++;  cobertos++; }
+      else                                naoIniciado++;
     });
   });
-  const pct = total ? (dominado / total) * 100 : 0;
-  return { total, naoIniciado, emEstudo, emRevisao, dominado, pct };
+  // pct = tópicos com ao menos 1 tentativa (cobertos) / total
+  const pct = total ? (cobertos / total) * 100 : 0;
+  return { total, naoIniciado, emEstudo, emRevisao, dominado, cobertos, pct };
 }
 
 function calcProgressoGeralEditais() {
-  let disciplinas = 0, total = 0, naoIniciado = 0, emEstudo = 0, emRevisao = 0, dominado = 0;
+  let disciplinas = 0, total = 0, naoIniciado = 0, emEstudo = 0, emRevisao = 0, dominado = 0, cobertos = 0;
   state.editais.forEach(e => {
     disciplinas += (e.materias || []).length;
     const p = calcProgressoEdital(e);
-    total += p.total; naoIniciado += p.naoIniciado; emEstudo += p.emEstudo; emRevisao += p.emRevisao; dominado += p.dominado;
+    total      += p.total;
+    naoIniciado+= p.naoIniciado;
+    emEstudo   += p.emEstudo;
+    emRevisao  += p.emRevisao;
+    dominado   += p.dominado;
+    cobertos   += p.cobertos;
   });
-  const pct = total ? (dominado / total) * 100 : 0;
-  return { disciplinas, total, naoIniciado, emEstudo, emRevisao, dominado, estudados: total - naoIniciado, pendentes: naoIniciado, pct };
+  const pct = total ? (cobertos / total) * 100 : 0;
+  return { disciplinas, total, naoIniciado, emEstudo, emRevisao, dominado, cobertos,
+           estudados: cobertos, pendentes: naoIniciado, pct };
 }
 
 /** HTML da seção "Progresso do Edital" a ser inserida no Dashboard (app.js chama isso). */
@@ -620,10 +626,10 @@ function buildDashboardEditalHTML() {
       <div class="stat-grid" style="margin-bottom:0;">
         <div class="stat-card"><div class="label">Disciplinas</div><div class="value">${p.disciplinas}</div></div>
         <div class="stat-card"><div class="label">Total de tópicos</div><div class="value">${p.total}</div></div>
-        <div class="stat-card info"><div class="label">Tópicos estudados</div><div class="value">${p.estudados}</div></div>
+        <div class="stat-card info"><div class="label">Tópicos cobertos</div><div class="value">${p.cobertos}</div></div>
         <div class="stat-card success"><div class="label">Tópicos dominados</div><div class="value">${p.dominado}</div></div>
-        <div class="stat-card danger"><div class="label">Tópicos pendentes</div><div class="value">${p.pendentes}</div></div>
-        <div class="stat-card gold"><div class="label">% concluído</div><div class="value">${fmtPct(p.pct)}</div></div>
+        <div class="stat-card danger"><div class="label">Não iniciados</div><div class="value">${p.pendentes}</div></div>
+        <div class="stat-card gold"><div class="label">% coberto</div><div class="value">${fmtPct(p.pct)}</div></div>
       </div>
       <div class="card">
         <div class="card-title">Status dos tópicos</div>
@@ -1497,11 +1503,7 @@ function renderKanbanCard(t, mi, ti, stats) {
    LISTA DE EDITAIS — substitui qualquer renderEditais anterior.
    Adiciona o botão "Criar edital em branco" além do "Importar".
    ============================================================ */
-async function renderEditais(view) {
-  // Garante que o state está atualizado antes de calcular cobertura
-  // (evita mostrar % desatualizado se o sync ainda não terminou)
-  if (typeof reloadState === 'function') await reloadState();
-
+function renderEditais(view) {
   const editais = state.editais || [];
 
   // Calcula cobertura de cada edital usando calcStatusEfetivoTopico
