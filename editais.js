@@ -707,12 +707,22 @@ function calcStatusAutomaticoTopico(nomeTopico, nomeDisciplina) {
   return { status, taxa, dias, tentativas: resumo.tentativas, questoes: resumo.total, coberto };
 }
 
-/** Status efetivo do tópico: statusManual prevalece sobre o cálculo automático. */
+/** Status efetivo do tópico: statusManual prevalece sobre o cálculo automático
+ *  para o LABEL/status visual, mas o campo `coberto` sempre usa os dados reais
+ *  de tentativas — assim a cobertura na lista e no detalhe ficam consistentes. */
 function calcStatusEfetivoTopico(t, nomeDisciplina) {
+  const automatico = calcStatusAutomaticoTopico(t.nome, nomeDisciplina);
   if (t.statusManual) {
-    return { status: t.statusManual, taxa: null, dias: null, tentativas: 0, questoes: 0, coberto: t.statusManual !== 'nao_visto' };
+    // statusManual define como o tópico aparece visualmente, mas coberto
+    // vem sempre do cálculo automático (taxa >= 50 ou statusManual != nao_visto
+    // quando não há tentativas ainda).
+    const coberto = automatico.questoes > 0
+      ? automatico.coberto
+      : t.statusManual !== 'nao_visto';
+    return { status: t.statusManual, taxa: automatico.taxa, dias: automatico.dias,
+             tentativas: automatico.tentativas, questoes: automatico.questoes, coberto };
   }
-  return calcStatusAutomaticoTopico(t.nome, nomeDisciplina);
+  return automatico;
 }
 
 /** Calcula o status da disciplina agregando tentativas por nome de disciplina. */
