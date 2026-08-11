@@ -1229,7 +1229,25 @@ function renderPrioridadeRevisao() {
 
   const norm = (s) => (s || '').trim().toLowerCase();
   const hoje = todayISO();
-  const materias = state.cicloMaterias || [];
+
+  // Só mostra matérias de ciclos que têm edital ativo com o mesmo nome,
+  // OU (fallback) do ciclo com mais sessões nos últimos 60 dias.
+  const editaisAtivos = (state.editais || []).filter(e => e.ativo !== false);
+  const nomesEditaisAtivos = new Set(editaisAtivos.map(e => norm(e.nome)));
+  const nomesConursosAtivos = new Set(editaisAtivos.map(e => norm(e.concurso || e.nome)));
+
+  // Ciclos com edital ativo correspondente (por nome do ciclo = nome/concurso do edital)
+  const ciclosComEdital = (state.ciclos || []).filter(c =>
+    nomesEditaisAtivos.has(norm(c.nome)) || nomesConursosAtivos.has(norm(c.nome))
+  );
+  const idsCiclosAtivos = new Set(ciclosComEdital.map(c => c.id));
+
+  // Fallback: se nenhum ciclo casar com edital, usa todos (comportamento anterior)
+  const usarTodos = idsCiclosAtivos.size === 0;
+
+  const materias = (state.cicloMaterias || []).filter(m =>
+    usarTodos || idsCiclosAtivos.has(m.cicloId)
+  );
 
   if (!materias.length) {
     card.innerHTML = `
