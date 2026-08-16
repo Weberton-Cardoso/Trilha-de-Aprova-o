@@ -1154,10 +1154,13 @@ async function _abrirModalEdicaoRelatorio(nomeMateria, dataISO) {
       const sel  = $(`.sel-tipo-sessao[data-sessao-idx="${idx}"]`);
       const tipo = sel?.value || null;
       if (!s) return;
-      await db.cicloSessoes.update({ ...s, tipoEstudo: tipo || null });
-      showToast('Tipo de estudo atualizado.', 'success');
-      btn.textContent = '✓';
       btn.disabled = true;
+      btn.textContent = '…';
+      await db.cicloSessoes.update({ ...s, tipoEstudo: tipo || null });
+      closeModal();
+      await reloadState();
+      renderRelatorioDiario();
+      showToast('Tipo de estudo atualizado.', 'success');
     });
   });
 
