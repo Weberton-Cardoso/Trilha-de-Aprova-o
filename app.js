@@ -1076,8 +1076,35 @@ async function _abrirModalEdicaoRelatorio(nomeMateria, dataISO) {
     <h2>✏️ Editar: ${escapeHtml(nomeMateria)}</h2>
     <p class="text-muted" style="font-size:13px;margin-top:0;">${toBRDate(dataISO)}</p>
 
+    ${sessoesExistentes.length ? `
     <div class="card mb-12" style="background:var(--surface-2);">
-      <div class="card-title" style="font-size:13.5px;">⏱ Tempo de estudo registrado: ${_formatarMinutos(totalMinutos)}</div>
+      <div class="card-title" style="font-size:13.5px;">⏱ Sessões registradas — ${_formatarMinutos(totalMinutos)} total</div>
+      ${sessoesExistentes.map((s, i) => `
+        <div style="padding:10px 0;border-bottom:1px solid var(--border);display:grid;gap:6px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <span style="font-size:13px;font-weight:600;">${_formatarMinutos(s.minutos || 0)}${s.topico ? ` — ${escapeHtml(s.topico)}` : ''}</span>
+            <span style="font-size:11.5px;color:var(--text-muted);">${s.ajusteManual ? 'lançamento manual' : 'ciclo de estudos'}</span>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <select class="sel-tipo-sessao" data-sessao-idx="${i}" style="flex:1;min-width:140px;font-size:13px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);">
+              <option value="">Não informado</option>
+              <option value="Primeiro estudo" ${s.tipoEstudo==='Primeiro estudo'?'selected':''}>Primeiro estudo</option>
+              <option value="Revisão" ${s.tipoEstudo==='Revisão'?'selected':''}>Revisão</option>
+              <option value="Vídeo" ${s.tipoEstudo==='Vídeo'?'selected':''}>Vídeo</option>
+              <option value="Leitura" ${s.tipoEstudo==='Leitura'?'selected':''}>Leitura</option>
+              <option value="Exercícios" ${s.tipoEstudo==='Exercícios'?'selected':''}>Exercícios</option>
+              <option value="Simulado" ${s.tipoEstudo==='Simulado'?'selected':''}>Simulado</option>
+              <option value="PDF" ${s.tipoEstudo==='PDF'?'selected':''}>PDF</option>
+            </select>
+            <button class="btn btn-sm btn-ghost btn-salvar-tipo-sessao" data-sessao-idx="${i}" style="white-space:nowrap;">Salvar</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
+
+    <div class="card mb-12" style="background:var(--surface-2);">
+      <div class="card-title" style="font-size:13.5px;">➕ Adicionar / corrigir tempo</div>
       <div class="form-row" style="margin-top:10px;">
         <label>Adicionar tempo (em minutos)</label>
         <input type="number" id="rel-edit-minutos-add" min="1" placeholder="Ex: 30">
@@ -1100,6 +1127,7 @@ async function _abrirModalEdicaoRelatorio(nomeMateria, dataISO) {
           <option value="Leitura">Leitura</option>
           <option value="Exercícios">Exercícios</option>
           <option value="Simulado">Simulado</option>
+          <option value="PDF">PDF</option>
         </select>
       </div>
       <button class="btn btn-primary mt-8" id="btn-rel-salvar-tempo">Salvar tempo</button>
@@ -1117,6 +1145,21 @@ async function _abrirModalEdicaoRelatorio(nomeMateria, dataISO) {
     </div>
     ` : ''}
   `);
+
+  // Salvar tipo de estudo de sessão existente
+  $$('.btn-salvar-tipo-sessao').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx  = Number(btn.dataset.sessaoIdx);
+      const s    = sessoesExistentes[idx];
+      const sel  = $(`.sel-tipo-sessao[data-sessao-idx="${idx}"]`);
+      const tipo = sel?.value || null;
+      if (!s) return;
+      await db.cicloSessoes.update({ ...s, tipoEstudo: tipo || null });
+      showToast('Tipo de estudo atualizado.', 'success');
+      btn.textContent = '✓';
+      btn.disabled = true;
+    });
+  });
 
   // Salvar tempo
   $('#btn-rel-salvar-tempo')?.addEventListener('click', async () => {
