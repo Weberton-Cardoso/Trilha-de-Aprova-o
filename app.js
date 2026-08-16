@@ -1167,24 +1167,29 @@ async function _abrirModalEdicaoRelatorio(nomeMateria, dataISO) {
   // Salvar tempo
   $('#btn-rel-salvar-tempo')?.addEventListener('click', async () => {
     const adicionar = Number($('#rel-edit-minutos-add')?.value || 0);
-    const total     = Number($('#rel-edit-minutos-total')?.value || -1);
+    const totalStr  = $('#rel-edit-minutos-total')?.value.trim();
+    const total     = totalStr !== '' ? Number(totalStr) : -1;
     const topico    = $('#rel-edit-topico')?.value.trim() || null;
     const tipo      = $('#rel-edit-tipo')?.value || null;
 
-    if (adicionar <= 0 && total < 0) {
-      showToast('Informe quantos minutos adicionar ou o total correto.', 'error');
+    const temAlteracao = adicionar !== 0 || total >= 0 || topico || tipo;
+    if (!temAlteracao) {
+      showToast('Informe pelo menos um campo para salvar.', 'error');
       return;
     }
 
-    let minutosNovas;
+    let minutosNovas = 0;
     if (total >= 0) {
-      // Corrigir: calcula a diferença para ajustar o cicloMateria
+      // "Corrigir total": a diferença pode ser negativa (redução) — permitido
       minutosNovas = total - totalMinutos;
-    } else {
-      minutosNovas = adicionar;
+    } else if (adicionar !== 0) {
+      minutosNovas = adicionar; // pode ser negativo se o usuário digitar valor negativo
     }
 
-    // Cria uma sessão manual para o dia e matéria informados
+    // Cria uma sessão de ajuste manual para o dia e matéria informados.
+    // minutosNovas pode ser 0 quando só se quer registrar tópico/tipo sem
+    // alterar o tempo — sessão com minutos=0 não some das listagens mas
+    // também não distorce os totais.
     const materia = (state.cicloMaterias || []).find(m =>
       norm(m.nome) === norm(nomeMateria)
     );
@@ -1200,7 +1205,8 @@ async function _abrirModalEdicaoRelatorio(nomeMateria, dataISO) {
       ...(tipo   ? { tipoEstudo: tipo } : {})
     });
 
-    // Atualiza minutosFeitos do cicloMateria se existir
+    // Atualiza minutosFeitos do cicloMateria — agora permite valores negativos
+    // (redução), mas não deixa cair abaixo de zero no total acumulado.
     if (materia && minutosNovas !== 0) {
       materia.minutosFeitos = Math.max(0, (materia.minutosFeitos || 0) + minutosNovas);
       await db.cicloMaterias.update(materia);
@@ -1209,7 +1215,7 @@ async function _abrirModalEdicaoRelatorio(nomeMateria, dataISO) {
     closeModal();
     await reloadState();
     renderRelatorioDiario();
-    showToast('Tempo atualizado no relatório.', 'success');
+    showToast('Relatório atualizado.', 'success');
   });
 
   // Editar tentativa existente
