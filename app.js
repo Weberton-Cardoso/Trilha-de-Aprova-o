@@ -1076,8 +1076,35 @@ async function _abrirModalEdicaoRelatorio(nomeMateria, dataISO) {
     <h2>✏️ Editar: ${escapeHtml(nomeMateria)}</h2>
     <p class="text-muted" style="font-size:13px;margin-top:0;">${toBRDate(dataISO)}</p>
 
+    ${sessoesExistentes.length ? `
     <div class="card mb-12" style="background:var(--surface-2);">
-      <div class="card-title" style="font-size:13.5px;">⏱ Tempo de estudo registrado: ${_formatarMinutos(totalMinutos)}</div>
+      <div class="card-title" style="font-size:13.5px;">⏱ Sessões registradas — ${_formatarMinutos(totalMinutos)} total</div>
+      ${sessoesExistentes.map((s, i) => `
+        <div style="padding:10px 0;border-bottom:1px solid var(--border);display:grid;gap:6px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <span style="font-size:13px;font-weight:600;">${_formatarMinutos(s.minutos || 0)}${s.topico ? ` — ${escapeHtml(s.topico)}` : ''}</span>
+            <span style="font-size:11.5px;color:var(--text-muted);">${s.ajusteManual ? 'lançamento manual' : 'ciclo de estudos'}</span>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <select class="sel-tipo-sessao" data-sessao-idx="${i}" style="flex:1;min-width:140px;font-size:13px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);">
+              <option value="">Não informado</option>
+              <option value="Primeiro estudo" ${s.tipoEstudo==='Primeiro estudo'?'selected':''}>Primeiro estudo</option>
+              <option value="Revisão" ${s.tipoEstudo==='Revisão'?'selected':''}>Revisão</option>
+              <option value="Vídeo" ${s.tipoEstudo==='Vídeo'?'selected':''}>Vídeo</option>
+              <option value="Leitura" ${s.tipoEstudo==='Leitura'?'selected':''}>Leitura</option>
+              <option value="Exercícios" ${s.tipoEstudo==='Exercícios'?'selected':''}>Exercícios</option>
+              <option value="Simulado" ${s.tipoEstudo==='Simulado'?'selected':''}>Simulado</option>
+              <option value="PDF" ${s.tipoEstudo==='PDF'?'selected':''}>PDF</option>
+            </select>
+            <button class="btn btn-sm btn-ghost btn-salvar-tipo-sessao" data-sessao-idx="${i}" style="white-space:nowrap;">Salvar</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
+
+    <div class="card mb-12" style="background:var(--surface-2);">
+      <div class="card-title" style="font-size:13.5px;">➕ Adicionar / corrigir tempo</div>
       <div class="form-row" style="margin-top:10px;">
         <label>Adicionar tempo (em minutos)</label>
         <input type="number" id="rel-edit-minutos-add" min="1" placeholder="Ex: 30">
@@ -1100,6 +1127,7 @@ async function _abrirModalEdicaoRelatorio(nomeMateria, dataISO) {
           <option value="Leitura">Leitura</option>
           <option value="Exercícios">Exercícios</option>
           <option value="Simulado">Simulado</option>
+          <option value="PDF">PDF</option>
         </select>
       </div>
       <button class="btn btn-primary mt-8" id="btn-rel-salvar-tempo">Salvar tempo</button>
@@ -1118,27 +1146,50 @@ async function _abrirModalEdicaoRelatorio(nomeMateria, dataISO) {
     ` : ''}
   `);
 
+  // Salvar tipo de estudo de sessão existente
+  $$('.btn-salvar-tipo-sessao').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx  = Number(btn.dataset.sessaoIdx);
+      const s    = sessoesExistentes[idx];
+      const sel  = $(`.sel-tipo-sessao[data-sessao-idx="${idx}"]`);
+      const tipo = sel?.value || null;
+      if (!s) return;
+      btn.disabled = true;
+      btn.textContent = '…';
+      await db.cicloSessoes.update({ ...s, tipoEstudo: tipo || null });
+      closeModal();
+      await reloadState();
+      renderRelatorioDiario();
+      showToast('Tipo de estudo atualizado.', 'success');
+    });
+  });
+
   // Salvar tempo
   $('#btn-rel-salvar-tempo')?.addEventListener('click', async () => {
     const adicionar = Number($('#rel-edit-minutos-add')?.value || 0);
-    const total     = Number($('#rel-edit-minutos-total')?.value || -1);
+    const totalStr  = $('#rel-edit-minutos-total')?.value.trim();
+    const total     = totalStr !== '' ? Number(totalStr) : -1;
     const topico    = $('#rel-edit-topico')?.value.trim() || null;
     const tipo      = $('#rel-edit-tipo')?.value || null;
 
-    if (adicionar <= 0 && total < 0) {
-      showToast('Informe quantos minutos adicionar ou o total correto.', 'error');
+    const temAlteracao = adicionar !== 0 || total >= 0 || topico || tipo;
+    if (!temAlteracao) {
+      showToast('Informe pelo menos um campo para salvar.', 'error');
       return;
     }
 
-    let minutosNovas;
+    let minutosNovas = 0;
     if (total >= 0) {
-      // Corrigir: calcula a diferença para ajustar o cicloMateria
+      // "Corrigir total": a diferença pode ser negativa (redução) — permitido
       minutosNovas = total - totalMinutos;
-    } else {
-      minutosNovas = adicionar;
+    } else if (adicionar !== 0) {
+      minutosNovas = adicionar; // pode ser negativo se o usuário digitar valor negativo
     }
 
-    // Cria uma sessão manual para o dia e matéria informados
+    // Cria uma sessão de ajuste manual para o dia e matéria informados.
+    // minutosNovas pode ser 0 quando só se quer registrar tópico/tipo sem
+    // alterar o tempo — sessão com minutos=0 não some das listagens mas
+    // também não distorce os totais.
     const materia = (state.cicloMaterias || []).find(m =>
       norm(m.nome) === norm(nomeMateria)
     );
@@ -1154,7 +1205,8 @@ async function _abrirModalEdicaoRelatorio(nomeMateria, dataISO) {
       ...(tipo   ? { tipoEstudo: tipo } : {})
     });
 
-    // Atualiza minutosFeitos do cicloMateria se existir
+    // Atualiza minutosFeitos do cicloMateria — agora permite valores negativos
+    // (redução), mas não deixa cair abaixo de zero no total acumulado.
     if (materia && minutosNovas !== 0) {
       materia.minutosFeitos = Math.max(0, (materia.minutosFeitos || 0) + minutosNovas);
       await db.cicloMaterias.update(materia);
@@ -1163,7 +1215,7 @@ async function _abrirModalEdicaoRelatorio(nomeMateria, dataISO) {
     closeModal();
     await reloadState();
     renderRelatorioDiario();
-    showToast('Tempo atualizado no relatório.', 'success');
+    showToast('Relatório atualizado.', 'success');
   });
 
   // Editar tentativa existente
